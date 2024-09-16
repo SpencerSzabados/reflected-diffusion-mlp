@@ -346,7 +346,8 @@ def main():
                 input_emb=args.input_emb)
 
     
-    noise_scheduler = NoiseScheduler(num_timesteps=args.num_timesteps,
+    noise_scheduler = NoiseScheduler(pred_type=args.pred_type,
+                                     num_timesteps=args.num_timesteps,
                                      beta_schedule=args.beta_schedule)
 
     

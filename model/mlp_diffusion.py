@@ -15,6 +15,7 @@ class NoiseScheduler():
     """
     def __init__(self,
                  diff_type="ddpm",
+                 pred_type="eps",
                  num_timesteps=1000,
                  beta_start=0.0001,
                  beta_end=0.02,
@@ -79,7 +80,7 @@ class NoiseScheduler():
     
     def get_score_from_noise(self, pred_noise, t):
         padding = th.ones_like(pred_noise).to(device=pred_noise.device)
-        sigmas = (self.get_variance(t)**0.5)*padding
+        sigmas = self.sqrt_one_minus_alphas_cumprod[t]*padding
         pred_score = -pred_noise/sigmas
 
         return pred_score
@@ -90,10 +91,8 @@ class NoiseScheduler():
         pred_original_sample = self.reconstruct_x0(sample, t, model_output)
         pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
 
-        variance = 0
-        if t > 0:
-            noise = th.randn_like(model_output)
-            variance = (self.get_variance(t) ** 0.5) * noise
+        noise = th.randn_like(model_output)
+        variance = (self.get_variance(t) ** 0.5) * noise
 
         pred_prev_sample = pred_prev_sample + variance
 
