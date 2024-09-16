@@ -14,7 +14,6 @@ import tempfile
 import warnings
 from collections import defaultdict
 from contextlib import contextmanager
-from .utils.train_util import obtain_slurm_ckpt_dir
 
 DEBUG = 10
 INFO = 20
@@ -444,12 +443,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
     """
     if dir is None:
         dir = os.getenv("OPENAI_LOGDIR")
-    if dir is None:
-        try:
-            dir = obtain_slurm_ckpt_dir()
-        except KeyError:
-            pass
-
+   
     if dir is None:
         dir = osp.join(
             tempfile.gettempdir(),
