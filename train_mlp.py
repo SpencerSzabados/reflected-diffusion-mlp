@@ -203,7 +203,9 @@ def hutchinson_divergence(model, noisy, timesteps, noise_scheduler, num_samples=
     Returns:
         divergence_term: The estimated divergence term.
     """
-    divergence = 0
+    noisy.requires_grad_(True)
+    divergence = th.zeros(noisy.shape[0]).to(device=noisy.device)
+
     for _ in range(num_samples):
         # Sample random noise for Hutchinson's estimator
         z = th.randn_like(noisy)
@@ -213,17 +215,20 @@ def hutchinson_divergence(model, noisy, timesteps, noise_scheduler, num_samples=
         pred_score = noise_scheduler.get_score_from_noise(pred_noise, timesteps[0])
         # Compute the gradient of the predicted score w.r.t. the noisy input
         grad_pred_score = th.autograd.grad(
-                                outputs=pred_score, 
-                                inputs=noisy, 
-                                grad_outputs=z, 
-                                create_graph=True, 
-                                retain_graph=True
-                            )[0]
-        
-        # Compute the Hutchinson divergence estimate
-        divergence += (grad_pred_score * z).sum(dim=1).mean()
+            outputs=pred_score,
+            inputs=noisy,
+            grad_outputs=z,
+            create_graph=True,
+            retain_graph=True  # Set to True if you need to compute higher-order derivatives
+        )[0]
+        # Compute the Hutchinson divergence estimate for this sample
+        divergence_sample = th.einsum('bi,bi->b', grad_pred_score, z)
+        divergence += divergence_sample
     
-    return divergence/num_samples
+    # Compute the average divergence estimate
+    divergence_mean = (divergence/num_samples).mean()
+    
+    return divergence_mean
 
 
 # Function to return either mse_loss or the implicit score matching loss
@@ -321,6 +326,10 @@ def main():
     time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.log(f"[{time}]"+"="*20+"\nJob started.")
     logger.log(f"Experiment: {args.exps}\n")
+    logger.log(f"diff_type: {args.diff_type}")
+    logger.log(f"pred_type: {args.pred_type}")
+    logger.log(f"loss: {args.loss}")
+    logger.log(f"Number of timesteps: {args.num_timesteps}")
 
     logger.log(f"Setting and loading constants...")
     global_step = 0
@@ -346,7 +355,8 @@ def main():
                 input_emb=args.input_emb)
 
     
-    noise_scheduler = NoiseScheduler(pred_type=args.pred_type,
+    noise_scheduler = NoiseScheduler(diff_type=args.diff_type,
+                                     pred_type=args.pred_type,
                                      num_timesteps=args.num_timesteps,
                                      beta_schedule=args.beta_schedule)
 
@@ -406,14 +416,26 @@ def main():
                 # generate data with the model to later visualize the learning process
                 model.eval()
                 with th.no_grad():
-                    sample = th.randn(sample_size, 2)
-                    timesteps = list(range(len(noise_scheduler)))[::-1]
-
-                    for i, t in enumerate(tqdm(timesteps)):
-                        sample = sample.to(distribute_util.dev())
-                        t = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
-                        residual = model(sample, t).to(distribute_util.dev())
-                        sample = noise_scheduler.step(residual, t[0], sample)
+                    if args.diff_type == "ddpm":
+                        sample = th.randn(sample_size, 2)
+                        timesteps = list(range(len(noise_scheduler)))[::-1]
+                        for i, t in enumerate(tqdm(timesteps)):
+                            sample = sample.to(distribute_util.dev())
+                            t = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
+                            residual = model(sample, t).to(distribute_util.dev())
+                            sample = noise_scheduler.step(residual, t[0], sample)
+                    elif args.diff_type == "ref":
+                        if args.pred_type == "x":
+                            sample, noise = noise_scheduler._sample_forwards_reflected_noise(batch)
+                            for i, t in enumerate(tqdm(timesteps)):
+                                sample = sample.to(distribute_util.dev())
+                                t = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
+                                residual = model(sample, t).to(distribute_util.dev())
+                                sample = noise_scheduler.step(residual, t[0], sample)
+                        else:
+                            raise NotImplementedError(f"Invalid combination of diff_type and pred_type paramters.")
+                    else:
+                        raise NotImplementedError(f"Invalid value for diff_type.")
 
                     frame = sample.detach().cpu().numpy()
 
