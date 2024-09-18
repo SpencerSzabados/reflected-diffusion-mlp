@@ -427,9 +427,10 @@ def main():
                     elif args.diff_type == "ref":
                         if args.pred_type == "x":
                             sample, noise = noise_scheduler._sample_forwards_reflected_noise(batch)
+                            timesteps = list(range(len(noise_scheduler)))[::-1]
                             for i, t in enumerate(tqdm(timesteps)):
                                 sample = sample.to(distribute_util.dev())
-                                t = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
+                                t = th.from_numpy(np.repeat(t, batch.shape[0])).long().to(distribute_util.dev())
                                 residual = model(sample, t).to(distribute_util.dev())
                                 sample = noise_scheduler.step(residual, t[0], sample)
                         else:
