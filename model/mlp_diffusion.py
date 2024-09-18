@@ -191,10 +191,11 @@ class NoiseScheduler():
         else:
             raise NotImplementedError(f"Must select valid self.pred_type.")
 
+        variance = 0
         if t > 0:
             noise = th.randn_like(model_output)
             variance = (self.get_variance(t) ** 0.5) * noise
-
+        
         pred_prev_sample = pred_prev_sample + variance
 
         return pred_prev_sample
