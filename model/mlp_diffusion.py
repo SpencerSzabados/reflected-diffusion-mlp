@@ -254,7 +254,7 @@ class NoiseScheduler():
                 pred_original_sample = self.reconstruct_x0(sample, t, model_output)
                 pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
             elif self.pred_type == "x":
-                pred_prev_sample = model_output
+                pred_prev_sample =  self.q_posterior(model_output, sample, t)
             elif self.pred_type == "s":
                 pred_prev_sample = sample + 0.5*self.get_variance(t)*model_output
             else:

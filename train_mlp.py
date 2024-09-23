@@ -19,6 +19,7 @@ from copy import deepcopy
 import blobfile as bf
 
 from model.utils.point_dataset_loader import load_data
+from model.utils.distribute_util import load_and_sync_parameters, save_checkpoint
 from model.mlp import MLP
 from model.mlp_diffusion import NoiseScheduler
 from model.model_modules.mlp_layers import rot_fn, inv_rot_fn
@@ -94,85 +95,6 @@ def create_argparser():
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser
-
-
-def obtain_slurm_ckpt_dir():
-    SLURM_JOB_ID = os.environ['SLURM_JOB_ID']
-    USER = os.environ['USER']
-    ckpt_dir=f'/checkpoint/{USER}/{SLURM_JOB_ID}'
-    return ckpt_dir
-
-
-def _parse_resume_step_from_filename(filename):
-        """
-        Parse filenames of the form path/to/checkpoint_NNNNNN.pt, where NNNNNN is the
-        checkpoint's number of steps.
-        """
-        split = filename.split("checkpoint_")
-        if len(split) == 2:
-            split1 = split[-1].split(".")[0]
-            try:
-                return int(split1)
-            except ValueError:
-                return 0
-        else:
-            return 0
-
-
-def find_resume_checkpoint_aux(ckpt_dir):
-    # search the lastest checkpoint in ckpt_dir
-    if not os.path.exists(ckpt_dir):
-        logger.warn(f'CANNOT FIND: {ckpt_dir}')
-        return None
-
-    last_resume_step = -1
-    for filename in os.listdir(ckpt_dir):
-        if ('checkpoint' in filename) and ('.pth' in filename):
-            resume_step = _parse_resume_step_from_filename(filename)
-            if resume_step > last_resume_step:
-                last_resume_step = resume_step
-
-    if last_resume_step > -1:
-        return os.path.join(ckpt_dir, f'checkpoint_{last_resume_step}.pth')
-    else:
-        return None
-
-
-def find_resume_checkpoint(args):
-    try:
-        ckpt_dir = os.path.join(args.working_dir, f"exps/{args.exps}/")
-        ckpt_file_path = find_resume_checkpoint_aux(ckpt_dir)
-        logger.info(f'ckpt_file_path is set to {ckpt_file_path}')
-        return ckpt_file_path
-
-    except KeyError:
-        logger.info('Cannot detect checkpoint dir.')
-        return None
-
-
-def load_and_sync_parameters(args, model, ema_model, optimizer):
-    """
-    Loads model, ema, and optimizer states from checkpoints.
-    """
-    resume_step = 0
-    if args.resume_training:
-        resume_checkpoint = find_resume_checkpoint(args) or find_resume_checkpoint_aux(args.resume_checkpoint)
-        if resume_checkpoint is not None:
-            logger.log(f"Found checkpoint: {resume_checkpoint}")
-            resume_step = _parse_resume_step_from_filename(resume_checkpoint)
-            resume_checkpoint = th.load(resume_checkpoint, map_location=distribute_util.dev())
-            if dist.get_rank() == 0:
-                logger.log(f"Loading model state...")
-                model.load_state_dict(resume_checkpoint["model"])
-                logger.log(f"Loading ema_model state...")
-                ema_model.load_state_dict(resume_checkpoint["ema_model"])
-                logger.log(f"Loading optimizer state...")
-                optimizer.load_state_dict(resume_checkpoint["optimizer"])
-            
-    model = model.to(device=distribute_util.dev())
-    ema_model = ema_model.to(device=distribute_util.dev())
-
-    return resume_step, model, ema_model, optimizer
 
 
 def update_ema(model, ema_model, ema):
@@ -488,13 +410,8 @@ def main():
                 model.train()
 
             if global_step % args.save_interval == 0 and global_step > 0:
-                logger.log("Saving model...")
-                checkpoint = {"global_step": global_step,
-                              "model": model.state_dict(),
-                              "ema_model": ema_model.state_dict(),
-                              "optimizer": optimizer.state_dict()}
-                th.save(checkpoint, f"{outdir}/checkpoint_{global_step}.pth")
-
+                save_checkpoint(outdir, model, ema_model, optimizer, global_step)
+                
 
 if __name__ == "__main__":
     main()
