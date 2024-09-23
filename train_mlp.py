@@ -69,6 +69,8 @@ def create_argparser():
         time_emb="sinusoidal",
         input_emb="sinusoidal",
         num_timesteps=50,
+        beta_start=0.0001,
+        beta_end=0.02,
         beta_schedule="linear",
         schedule_sampler="uniform",
         lr=1e-4,
@@ -190,7 +192,7 @@ def update_ema(model, ema_model, ema):
             ema_param.data.mul_(ema).add_(model_param.data, alpha=(1 - ema))
 
 
-def hutchinson_divergence(model, noisy, timesteps, noise_scheduler, num_samples=10):
+def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=10):
     """
     Estimates the divergence term using Hutchinson's estimator.
     
@@ -209,10 +211,17 @@ def hutchinson_divergence(model, noisy, timesteps, noise_scheduler, num_samples=
     for _ in range(num_samples):
         # Sample random noise for Hutchinson's estimator
         z = th.randn_like(noisy)
-        # Predict the noise (epsilon) using the model
-        pred_noise = model(noisy, timesteps)
-        # Convert predicted noise to score using the noise scheduler
-        pred_score = noise_scheduler.get_score_from_noise(pred_noise, timesteps[0])
+
+        if args.pred_type == "eps":
+            # Predict the noise (epsilon) using the model
+            pred_noise = model(noisy, timesteps)
+            # Convert predicted noise to score using the noise scheduler
+            pred_score = noise_scheduler.get_score_from_noise(pred_noise, timesteps[0])
+        elif args.pred_type == "s":
+            pred_score = model(noisy, timesteps)
+        else:
+            raise ValueError(f"Invalid paramter value for {args.pred_type}.")
+        
         # Compute the gradient of the predicted score w.r.t. the noisy input
         grad_pred_score = th.autograd.grad(
             outputs=pred_score,
@@ -253,14 +262,25 @@ def get_loss_fn(args):
                 # 1/2 ||s_theta(x)||_2^2 (regularization term)
                 norm_term = 0.5 * th.sum(pred_score**2, dim=1).mean()
                 # div(s_theta(x)) (Hutchinson divergence estimator)
-                divergence_term = hutchinson_divergence(model, noisy, timesteps, noise_scheduler)
+                divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
                 # Total ISM loss
                 return norm_term + divergence_term
-            return loss_fn
+        
+        elif args.pred_type == "s": 
+            def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
+                # Ensure noisy requires gradient for autograd to compute the divergence
+                noisy.requires_grad_(True)
+                pred_score = model(noisy, timesteps)
+                # 1/2 ||s_theta(x)||_2^2 (regularization term)
+                norm_term = 0.5 * th.sum(pred_score**2, dim=1).mean()
+                # div(s_theta(x)) (Hutchinson divergence estimator)
+                divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
+                # Total ISM loss
+                return norm_term + divergence_term
 
     elif args.loss == "dsm":
         # Define the loss function based on g_equiv and pred_type
-        if args.pred_type == 'eps':
+        if args.pred_type == 'eps': # Predicting epsilon added to x_0 to get x_t
             if args.g_equiv and args.g_input == "C5":
                 # Precompute the logic for rotational MSE loss for 'eps'
                 def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
@@ -276,7 +296,7 @@ def get_loss_fn(args):
                     noise_pred = model(noisy, timesteps)
                     return F.mse_loss(noise_pred, noise)
 
-        elif args.pred_type == 'x':
+        elif args.pred_type == 'x': # Predicting x_0 from x_t
             if args.g_equiv and args.g_input == "C5":
                 # Precompute the logic for rotational MSE loss for 'x'
                 def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
@@ -291,6 +311,14 @@ def get_loss_fn(args):
                 def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
                     x_pred = model(noisy, timesteps)
                     return F.mse_loss(x_pred, batch)
+                
+        elif args.pred_type == "s": # Predicting the score at time t
+            def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
+                pred_score = model(noisy, timesteps)
+                # Compute analytical score estimate 
+                score = noise_scheduler.get_score_from_pred(noise, noisy, timesteps[0])
+                # Total loss
+                return F.mse_loss(pred_score, score)
                 
         else:
             raise NotImplementedError(f"The option {args.loss} is not supported.")
@@ -325,11 +353,11 @@ def main():
 
     time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.log(f"[{time}]"+"="*20+"\nJob started.")
-    logger.log(f"Experiment: {args.exps}\n")
+    logger.log(f"Experiment: {args.exps}")
     logger.log(f"diff_type: {args.diff_type}")
     logger.log(f"pred_type: {args.pred_type}")
     logger.log(f"loss: {args.loss}")
-    logger.log(f"Number of timesteps: {args.num_timesteps}")
+    logger.log(f"Number of timesteps: {args.num_timesteps}\n")
 
     logger.log(f"Setting and loading constants...")
     global_step = 0
@@ -345,18 +373,21 @@ def main():
     else:
         batch_size = args.batch_size
 
-    dataloader, dataset = load_data(data_dir=args.data_dir, batch_size=batch_size)
+    train_loader, test_loader = load_data(data_dir=args.data_dir, train_batch_size=batch_size, test_batch_size=sample_size)
 
     logger.log("Creating model and noise scheduler...")  
     model = MLP(hidden_layers=args.hidden_layers, 
                 hidden_size=args.hidden_size,
                 emb_size=args.emb_size,
                 time_emb=args.time_emb,
-                input_emb=args.input_emb)
+                input_emb=args.input_emb,
+                diff_type=args.diff_type)
 
     
     noise_scheduler = NoiseScheduler(diff_type=args.diff_type,
                                      pred_type=args.pred_type,
+                                     beta_start=args.beta_start,
+                                     beta_end=args.beta_end,
                                      num_timesteps=args.num_timesteps,
                                      beta_schedule=args.beta_schedule)
 
@@ -379,7 +410,7 @@ def main():
     logger.log(f"[{time}]"+"="*20+"\nTraining model...\n")
     while global_step < args.training_steps:
         model.train()
-        for step, batch in enumerate(dataloader):
+        for step, batch in enumerate(train_loader):
             batch = batch[0]
             noise = th.randn(batch.shape)
             timesteps = th.randint(0, noise_scheduler.num_timesteps, (batch.shape[0],)).long()
@@ -389,12 +420,13 @@ def main():
             batch = batch.to(distribute_util.dev())
             noise = noise.to(distribute_util.dev())
             noisy = noisy.to(distribute_util.dev())
-            timesteps = timesteps.to(distribute_util.dev())
+            # timesteps = timesteps.to(distribute_util.dev())
 
             # Compute loss
             optimizer.zero_grad()
             # Compute the loss using the selected loss function
             loss = loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch)
+            # Update gradients
             loss.backward()
             # nn.utils.clip_grad_norm_(model.parameters(), 1.0) # TODO: removed this line to speed up convergence.
             optimizer.step()
@@ -405,15 +437,19 @@ def main():
 
             global_step += 1
 
+            # If logging interval is reached log time, step number, and current batch loss.
             if global_step % args.log_interval == 0 and global_step > 0:
                 time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 logger.log(f"[{time}]"+"-"*20)
+                logger.log(f"Time: {timesteps[0]}")
                 logger.log(f"Step: {global_step}")
                 logger.log(f"Loss: {loss.detach().item()}")
 
+            # If sampling interval is reached generate and save incremental sample.
             if global_step % args.sample_interval == 0 and global_step > 0:
                 logger.log("Logging (saving) sample plot...")
-                # generate data with the model to later visualize the learning process
+                # Generate data with the model to later visualize the learning process.
+                # Sampling process changes based on the chosen parameterization.
                 model.eval()
                 with th.no_grad():
                     if args.diff_type == "ddpm":
@@ -424,17 +460,20 @@ def main():
                             t = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
                             residual = model(sample, t).to(distribute_util.dev())
                             sample = noise_scheduler.step(residual, t[0], sample)
+
                     elif args.diff_type == "ref":
                         if args.pred_type == "x":
-                            sample, noise = noise_scheduler._sample_forwards_reflected_noise(batch)
+                            sample_batch = next(iter(test_loader))[0]
+                            sample, noise = noise_scheduler._sample_forwards_reflected_noise(sample_batch)
                             timesteps = list(range(len(noise_scheduler)))[::-1]
                             for i, t in enumerate(tqdm(timesteps)):
                                 sample = sample.to(distribute_util.dev())
-                                t = th.from_numpy(np.repeat(t, batch.shape[0])).long().to(distribute_util.dev())
+                                t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
                                 residual = model(sample, t).to(distribute_util.dev())
                                 sample = noise_scheduler.step(residual, t[0], sample)
                         else:
                             raise NotImplementedError(f"Invalid combination of diff_type and pred_type paramters.")
+                        
                     else:
                         raise NotImplementedError(f"Invalid value for diff_type.")
 

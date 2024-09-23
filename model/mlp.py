@@ -21,9 +21,14 @@ class MLP(nn.Module):
             emb_size: int = 128,
             time_emb: str = "sinusoidal", 
             input_emb: str = "sinusoidal",
+            diff_type: str = "ddpm",
+            boundary_tol: float = 0.05,
         ):
 
         super().__init__()
+
+        self.diff_type = diff_type
+        self.boundary_tol = boundary_tol
 
         self.time_mlp = PositionalEmbedding(emb_size, time_emb)
         self.input_mlp1 = PositionalEmbedding(emb_size, input_emb, scale=25.0)
@@ -31,19 +36,58 @@ class MLP(nn.Module):
 
         concat_size = len(self.time_mlp.layer) + len(self.input_mlp1.layer) + len(self.input_mlp2.layer)
         layers = [nn.Linear(concat_size, hidden_size), nn.GELU()]
+        self.fn = nn.ReLU()
 
         for _ in range(hidden_layers):
             layers.append(MLPBlock(hidden_size))
-
         layers.append(nn.Linear(hidden_size, 2))
+
         self.joint_mlp = nn.Sequential(*layers)
 
-    def forward(self, x, t):
-        x1_emb = self.input_mlp1(x[:, 0])
-        x2_emb = self.input_mlp2(x[:, 1])
+
+    def _compute_boundary_distance(self, x):
+        """
+        Determines the minimum distance from each point in x_t to the closer of the two annulus boundaries.
+
+        Args:
+            x_t (torch.Tensor): A tensor of shape [batch_size, 2] representing 2D points.
+
+        Returns:
+            torch.Tensor: A tensor of shape [batch_size], containing the minimum distance from each point to the closest boundary.
+        """
+        r_in = 0.25
+        r_out = 1.0
+
+        # Compute the Euclidean distance of each point from the origin
+        distances = th.linalg.norm(x, ord=2, dim=1)
+
+        # Compute the absolute distances to the inner and outer boundaries
+        distance_to_inner = th.abs(distances - r_in)
+        distance_to_outer = th.abs(distances - r_out)
+
+        # Determine the minimum distance to the closest boundary
+        min_distance = th.min(distance_to_inner, distance_to_outer)
+
+        return min_distance
+
+
+    def forward(self, x_t, t):
+        t = t.to(device=x_t.device)
+
+        x1_emb = self.input_mlp1(x_t[:, 0])
+        x2_emb = self.input_mlp2(x_t[:, 1])
         t_emb = self.time_mlp(t)
 
-        x = th.cat((x1_emb, x2_emb, t_emb), dim=-1)
-        x = self.joint_mlp(x)
+        x_t_emb = th.cat((x1_emb, x2_emb, t_emb), dim=-1)
+        x = self.joint_mlp(x_t_emb)
+
+        # TODO: This code needs to be debugged.
+        if self.diff_type == "ref":
+            if self.pred_type == "s":
+                boundary_dist = self._compute_boundary_distance(x_t)
+                x = th.min(1, self.fn(boundary_dist-self.boundary_tol))*x
+            else:
+                raise ValueError(f"Must use score prediction for reflected diffusion.")
+
         
         return x

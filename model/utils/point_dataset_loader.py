@@ -12,7 +12,8 @@ from torch.utils.data import DataLoader, TensorDataset
 def load_data(
     *,
     data_dir,
-    batch_size,
+    train_batch_size,
+    test_batch_size,
     deterministic=False,
 ):
     """
@@ -32,12 +33,18 @@ def load_data(
     dataset = TensorDataset(th.from_numpy(np.load(data_dir)["data"]).type(th.float32))
     
     if deterministic:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True
+        train_loader = DataLoader(
+            dataset, batch_size=train_batch_size, shuffle=False, num_workers=1, drop_last=True
+        )
+        test_loader = DataLoader(
+            dataset, batch_size=test_batch_size, shuffle=False, num_workers=1, drop_last=True
         )
     else:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=1, drop_last=True
+        train_loader = DataLoader(
+            dataset, batch_size=train_batch_size, shuffle=True, num_workers=1, drop_last=True
+        )
+        test_loader = DataLoader(
+            dataset, batch_size=test_batch_size, shuffle=True, num_workers=1, drop_last=True
         )
     
-    return loader, dataset
+    return train_loader, test_loader

@@ -53,20 +53,17 @@ class NoiseScheduler():
     def reconstruct_x0(self, x_t, t, noise):
         assert(x_t.device == noise.device)
 
-        s1 = self.sqrt_inv_alphas_cumprod[t]
-        s2 = self.sqrt_inv_alphas_cumprod_minus_one[t]
-        s1 = s1.reshape(-1, 1).to(device=x_t.device)
-        s2 = s2.reshape(-1, 1).to(device=x_t.device)
+        s1 = self.sqrt_inv_alphas_cumprod[t].reshape(-1, 1).to(device=x_t.device)
+        s2 = self.sqrt_inv_alphas_cumprod_minus_one[t].reshape(-1, 1).to(device=x_t.device)
 
         return s1 * x_t - s2 * noise
 
     def q_posterior(self, x_0, x_t, t):
         assert(x_0.device == x_t.device)
 
-        s1 = self.posterior_mean_coef1[t]
-        s2 = self.posterior_mean_coef2[t]
-        s1 = s1.reshape(-1, 1).to(device=x_t.device)
-        s2 = s2.reshape(-1, 1).to(device=x_t.device)
+        s1 = self.posterior_mean_coef1[t].reshape(-1, 1).to(device=x_t.device)
+        s2 = self.posterior_mean_coef2[t].reshape(-1, 1).to(device=x_t.device)
+    
         mu = s1 * x_0 + s2 * x_t
 
         return mu
@@ -80,12 +77,56 @@ class NoiseScheduler():
 
         return variance
     
-    def get_score_from_noise(self, pred_noise, t):
-        padding = th.ones_like(pred_noise).to(device=pred_noise.device)
-        sigmas = self.sqrt_one_minus_alphas_cumprod[t]*padding
-        pred_score = -pred_noise/sigmas
+    def get_score_from_pred(self, model_output, x_t, t):
+        """
+        This function converts a noise or x_0 prediction to an estimate of the score at time t.
+        This estimate is only valid  for diff_type=="ddpm". (or approximatly valid if for 
+        sufficient time steps taken with small step size for diff_type=="ref")
+
+        Params:
+            pred_pred (Torch.tensor): Model output. Predicted noise that was added to x_0 to 
+                get x_t in the forwards process.
+
+        Returns:
+            pred_score (Torch.tensor): Estimate of the score function at time t for input x_t.
+        """
+        padding = th.ones_like(model_output).to(device=model_output.device)
+        pred_score = th.zeros_like(model_output)
+
+        if self.diff_type == "ddpm":
+            if self.pred_type == "eps":
+                sigmas = self.sqrt_one_minus_alphas_cumprod[t]*padding
+                pred_score = -model_output/(sigmas+1e-20)
+
+            elif self.pred_type == "x":
+                pred_score = -(x_t - self.alphas_cumprod[t]*model_output)/(self.sqrt_one_minus_alphas_cumprod**2)
+
+            elif self.pred_type == "s":
+                sigmas = self.sqrt_one_minus_alphas_cumprod[t]*padding
+                pred_score = -model_output/(sigmas+1e-20)
+
+            else:
+                raise NotImplementedError
+            
+        elif self.diff_type == "ref":
+            if self.pred_type == "x":
+                if isinstance(t, th.Tensor):
+                    t = t[0] 
+
+                if t == 0:
+                    step_size = self.betas[1]-self.betas[0]
+                else:
+                    step_size = self.betas[t]-self.betas[t-1]
+
+                variance = (step_size*t + 1e-20)*padding
+                pred_score = -(x_t-model_output)/variance
+            else:
+                raise NotImplementedError
+        else:
+            raise NotImplementedError
 
         return pred_score
+
 
     # TODO: The current _compute_collisions function uses hard coded boundaries.
     #       Implement one that loads the boundaries from a config file or dataloder.
@@ -104,7 +145,7 @@ class NoiseScheduler():
         r_in = 0.25
         r_out = 1.0
 
-        distances = th.norm(x_t, dim=1)
+        distances = th.linalg.norm(x_t, ord=2, dim=1)
         
         # Determine if distances are within [r_in, r_out]
         free_idx = (distances >= r_in) & (distances <= r_out)
@@ -115,13 +156,18 @@ class NoiseScheduler():
     @th.no_grad()
     def _forward_reflected_noise(self, x_start, t):
         # Perform Metropolis-Hastings random walk 
+
+        # TODO: change the way t is passed to this function.
+        if isinstance(t, th.Tensor):
+            t = t[0] 
+
         if t == 0:
             step_size = self.betas[1]-self.betas[0]
         else:
             step_size = self.betas[t]-self.betas[t-1]
         step_size = th.sqrt(step_size) # TODO: DEBUG using linear (fixed) step size requires a larger number of sampling steps
 
-        noise = th.zeros_like(x_start)
+        noise = th.randn_like(x_start)
         x_noisy = x_start
         previous_noise = noise.clone()
         previous_x_noisy = x_noisy.clone()
@@ -144,7 +190,17 @@ class NoiseScheduler():
             noise_sample = th.randn_like(x_start)
             noise = noise+step_size*noise_sample
             x_noisy = x_noisy+step_size*noise_sample
-     
+
+        # TODO: Debug - incremental savinging of generated x_noisy
+        #     import matplotlib.pyplot as plt
+        #     frame = x_noisy.detach().cpu().numpy()
+        #     plt.figure(figsize=(4, 4))
+        #     plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+        #     plt.axis('off')
+        #     plt.savefig(f"tmp/sample_{k}.png", transparent=True)
+        #     plt.close()
+        # exit()
+
         return x_noisy, noise
     
     @th.no_grad()
@@ -177,28 +233,62 @@ class NoiseScheduler():
             noise_sample = th.randn_like(x_start)
             noise = noise+step_size*noise_sample
             x_noisy = x_noisy+step_size*noise_sample
+
+        # TODO: Debug - incremental savinging of generated x_noisy
+        #     import matplotlib.pyplot as plt
+        #     frame = x_noisy.detach().cpu().numpy()
+        #     plt.figure(figsize=(4, 4))
+        #     plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+        #     plt.axis('off')
+        #     plt.savefig(f"tmp/x_noise_sample_{k}.png", transparent=True)
+        #     plt.close()
+        # exit()
      
         return x_noisy, noise
     
     def step(self, model_output, t, sample):
         assert(model_output.device == sample.device)
 
-        if self.pred_type == "eps":
-            pred_original_sample = self.reconstruct_x0(sample, t, model_output)
-            pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
-        elif self.pred_type == "x":
-            pred_prev_sample = model_output
-        else:
-            raise NotImplementedError(f"Must select valid self.pred_type.")
-
         if self.diff_type == "ddpm":
+            if self.pred_type == "eps":
+                pred_original_sample = self.reconstruct_x0(sample, t, model_output)
+                pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
+            elif self.pred_type == "x":
+                pred_prev_sample = model_output
+            elif self.pred_type == "s":
+                pred_prev_sample = sample + 0.5*self.get_variance(t)*model_output
+            else:
+                raise NotImplementedError(f"Must select valid self.pred_type.")
+            
             variance = 0
             if t > 0:
                 noise = th.randn_like(model_output)
                 variance = (self.get_variance(t) ** 0.5) * noise
             pred_prev_sample = pred_prev_sample + variance
+
         elif self.diff_type == "ref":
-            pred_prev_sample = pred_prev_sample
+            if self.pred_type == "eps":
+                pred_original_sample = self.reconstruct_x0(sample, t, model_output)
+                pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
+            elif self.pred_type == "x":
+                pred_prev_sample = model_output
+            else:
+                raise NotImplementedError(f"Must select valid self.pred_type.")
+            
+            noise = 0
+            if t > 0:
+                noisy, noise = self._forward_reflected_noise(pred_prev_sample, t)
+            pred_prev_sample = pred_prev_sample + noise
+
+        # TODO: Debug - incremental savinging of generated x_noisy
+        # import matplotlib.pyplot as plt
+        # frame = pred_prev_sample.detach().cpu().numpy()
+        # plt.figure(figsize=(4, 4))
+        # plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+        # plt.axis('off')
+        # plt.savefig(f"tmp/x_denoise_sample_{t}.png", transparent=True)
+        # plt.close()
+        # exit()
 
         return pred_prev_sample
 
