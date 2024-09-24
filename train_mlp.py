@@ -19,7 +19,7 @@ from copy import deepcopy
 import blobfile as bf
 
 from model.utils.point_dataset_loader import load_data
-from model.utils.distribute_util import load_and_sync_parameters, save_checkpoint
+from model.utils.checkpoint_util import load_and_sync_parameters, save_checkpoint
 from model.mlp import MLP
 from model.mlp_diffusion import NoiseScheduler
 from model.model_modules.mlp_layers import rot_fn, inv_rot_fn
@@ -139,19 +139,20 @@ def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_sa
             pred_noise = model(noisy, timesteps)
             # Convert predicted noise to score using the noise scheduler
             pred_score = noise_scheduler.get_score_from_noise(pred_noise, timesteps[0])
+
         elif args.pred_type == "s":
             pred_score = model(noisy, timesteps)
+
         else:
             raise ValueError(f"Invalid paramter value for {args.pred_type}.")
         
+        sum_score = th.sum(pred_score*z)
         # Compute the gradient of the predicted score w.r.t. the noisy input
-        grad_pred_score = th.autograd.grad(
-            outputs=pred_score,
-            inputs=noisy,
-            grad_outputs=z,
-            create_graph=True,
-            retain_graph=True  # Set to True if you need to compute higher-order derivatives
-        )[0]
+        grad_pred_score = th.autograd.grad(outputs=sum_score,
+                                           inputs=noisy,
+                                           create_graph=True,
+                                           retain_graph=True  # Set to True if you need to compute higher-order derivatives
+                                        )[0]
         # Compute the Hutchinson divergence estimate for this sample
         divergence_sample = th.einsum('bi,bi->b', grad_pred_score, z)
         divergence += divergence_sample
@@ -182,23 +183,25 @@ def get_loss_fn(args):
                 pred_noise = model(noisy, timesteps)
                 pred_score = noise_scheduler.get_score_from_noise(pred_noise, timesteps[0])
                 # 1/2 ||s_theta(x)||_2^2 (regularization term)
-                norm_term = 0.5 * th.sum(pred_score**2, dim=1).mean()
+                norm_term = 0.5*th.sum(pred_score**2, dim=1).mean()
                 # div(s_theta(x)) (Hutchinson divergence estimator)
                 divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
                 # Total ISM loss
                 return norm_term + divergence_term
-        
+            return loss_fn
+
         elif args.pred_type == "s": 
             def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
                 # Ensure noisy requires gradient for autograd to compute the divergence
                 noisy.requires_grad_(True)
                 pred_score = model(noisy, timesteps)
                 # 1/2 ||s_theta(x)||_2^2 (regularization term)
-                norm_term = 0.5 * th.sum(pred_score**2, dim=1).mean()
+                norm_term = 0.5*th.sum(pred_score**2, dim=1).mean()
                 # div(s_theta(x)) (Hutchinson divergence estimator)
                 divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
                 # Total ISM loss
                 return norm_term + divergence_term
+            return loss_fn
 
     elif args.loss == "dsm":
         # Define the loss function based on g_equiv and pred_type
@@ -212,11 +215,14 @@ def get_loss_fn(args):
                         noise_pred = inv_rot_fn(model(noisy_rot, timesteps), 2 * th.pi / 5.0, k)
                         loss += F.mse_loss(noise_pred, noise)
                     return loss / 5.0  # Average over the 5 rotations
+                return loss_fn
+            
             else:
                 # Standard MSE loss for 'eps'
                 def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
                     noise_pred = model(noisy, timesteps)
                     return F.mse_loss(noise_pred, noise)
+                return loss_fn
 
         elif args.pred_type == 'x': # Predicting x_0 from x_t
             if args.g_equiv and args.g_input == "C5":
@@ -228,11 +234,14 @@ def get_loss_fn(args):
                         x_pred = inv_rot_fn(model(noisy_rot, timesteps), 2 * th.pi / 5.0, k)
                         loss += F.mse_loss(x_pred, batch)
                     return loss / 5.0  # Average over the 5 rotations
+                return loss_fn
+            
             else:
                 # Standard MSE loss for 'x'
                 def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
                     x_pred = model(noisy, timesteps)
                     return F.mse_loss(x_pred, batch)
+                return loss_fn
                 
         elif args.pred_type == "s": # Predicting the score at time t
             def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
@@ -241,11 +250,11 @@ def get_loss_fn(args):
                 score = noise_scheduler.get_score_from_pred(noise, noisy, timesteps[0])
                 # Total loss
                 return F.mse_loss(pred_score, score)
+            return loss_fn
                 
         else:
             raise NotImplementedError(f"The option {args.loss} is not supported.")
 
-        return loss_fn
     
 
 def main():
@@ -303,7 +312,8 @@ def main():
                 emb_size=args.emb_size,
                 time_emb=args.time_emb,
                 input_emb=args.input_emb,
-                diff_type=args.diff_type)
+                diff_type=args.diff_type,
+                pred_type=args.pred_type)
 
     
     noise_scheduler = NoiseScheduler(diff_type=args.diff_type,
@@ -384,7 +394,6 @@ def main():
                             sample = noise_scheduler.step(residual, t[0], sample)
 
                     elif args.diff_type == "ref":
-                        if args.pred_type == "x":
                             sample_batch = next(iter(test_loader))[0]
                             sample, noise = noise_scheduler._sample_forwards_reflected_noise(sample_batch)
                             timesteps = list(range(len(noise_scheduler)))[::-1]
@@ -393,9 +402,7 @@ def main():
                                 t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
                                 residual = model(sample, t).to(distribute_util.dev())
                                 sample = noise_scheduler.step(residual, t[0], sample)
-                        else:
-                            raise NotImplementedError(f"Invalid combination of diff_type and pred_type paramters.")
-                        
+                    
                     else:
                         raise NotImplementedError(f"Invalid value for diff_type.")
 

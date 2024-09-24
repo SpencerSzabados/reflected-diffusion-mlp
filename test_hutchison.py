@@ -43,13 +43,46 @@ def hutchinson_divergence(f, x, num_samples=1000):
     divergence_estimates = torch.zeros(batch_size, device=x.device)
 
     for _ in range(num_samples):
-        z = torch.randn_like(x)  # Sample z ~ N(0, I)
+        z = torch.randn_like(x)  # Sample z ~ N(0, I) 
         f_x = f(x)  # Compute f(x)
         # Compute the dot product z^T (∇_x f(x))
         grad_f_x = torch.autograd.grad(
             outputs=f_x,
             inputs=x,
             grad_outputs=z,
+            create_graph=False,
+            retain_graph=True,
+        )[0]  # Shape [batch_size, 2]
+        # divergence_estimates.append(divergence_sample)
+        divergence_sample = torch.einsum('bi,bi->b', grad_f_x, z)  # Element-wise product and sum over features
+        divergence_estimates += divergence_sample
+
+    divergence_estimates /= num_samples  # Average over samples
+    return divergence_estimates  # Shape [batch_size]
+
+
+def hutchinson_divergence_sum(f, x, num_samples=1000):
+    """
+    Estimates the divergence of function f at points x using Hutchinson's estimator.
+
+    Args:
+        f (callable): The function from R^2 to R^2.
+        x (torch.Tensor): Input tensor of shape [batch_size, 2] with requires_grad=True.
+        num_samples (int): Number of samples to use in the estimator.
+
+    Returns:
+        divergence_estimate (torch.Tensor): Estimated divergence, shape [batch_size]
+    """
+    batch_size = x.shape[0]
+    divergence_estimates = torch.zeros(batch_size, device=x.device)
+
+    for _ in range(num_samples):
+        z = torch.randn_like(x)  # Sample z ~ N(0, I) 
+        f_x = torch.sum(f(x)*z)  # Compute f(x)
+        # Compute the dot product z^T (∇_x f(x))
+        grad_f_x = torch.autograd.grad(
+            outputs=f_x,
+            inputs=x,
             create_graph=False,
             retain_graph=True,
         )[0]  # Shape [batch_size, 2]
@@ -76,7 +109,7 @@ def main():
     analytical_div = analytical_divergence(grid_points).detach().numpy()  # Shape [2500]
 
     # Compute estimated divergence
-    estimated_div = hutchinson_divergence(test_function, grid_points, num_samples=100).detach().numpy()
+    estimated_div = hutchinson_divergence_sum(test_function, grid_points, num_samples=20).detach().numpy()
 
     # Compute absolute error
     error = np.abs(estimated_div - analytical_div)
@@ -93,7 +126,7 @@ def main():
     plt.title('Error between Analytical and Estimated Divergence')
     plt.xlabel('x')
     plt.ylabel('y')
-    plt.savefig(f"tmp/test_hutchison.png", transparent=True)
+    plt.savefig(f"tmp/test_hutchison_sum.png", transparent=True)
     plt.close()
 
 

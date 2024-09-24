@@ -158,7 +158,7 @@ class NoiseScheduler():
         # Perform Metropolis-Hastings random walk 
 
         # TODO: change the way t is passed to this function.
-        if isinstance(t, th.Tensor):
+        if isinstance(t, th.Tensor) and t.ndim > 0:
             t = t[0] 
 
         if t == 0:
@@ -253,25 +253,33 @@ class NoiseScheduler():
             if self.pred_type == "eps":
                 pred_original_sample = self.reconstruct_x0(sample, t, model_output)
                 pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
+
             elif self.pred_type == "x":
                 pred_prev_sample =  self.q_posterior(model_output, sample, t)
+
             elif self.pred_type == "s":
-                pred_prev_sample = sample + 0.5*self.get_variance(t)*model_output
+                pred_prev_sample = (1.0/th.sqrt(self.alphas[t]))*(sample + self.betas[t]*model_output)
+
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
             
             variance = 0
             if t > 0:
                 noise = th.randn_like(model_output)
-                variance = (self.get_variance(t) ** 0.5) * noise
+                variance = (self.get_variance(t)**0.5)*noise
             pred_prev_sample = pred_prev_sample + variance
 
         elif self.diff_type == "ref":
             if self.pred_type == "eps":
                 pred_original_sample = self.reconstruct_x0(sample, t, model_output)
                 pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
+
             elif self.pred_type == "x":
                 pred_prev_sample = model_output
+
+            elif self.pred_type == "s":
+                pred_prev_sample = sample + 0.5*(t**0.5)*model_output
+                
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
             
@@ -298,9 +306,11 @@ class NoiseScheduler():
         if self.diff_type == "ddpm":
             s1 = self.sqrt_alphas_cumprod[t].reshape(-1, 1)
             s2 = self.sqrt_one_minus_alphas_cumprod[t].reshape(-1, 1)
-            x_noisy =  s1 * x_start + s2 * noise
+            x_noisy =  s1*x_start + s2*noise
+
         elif self.diff_type == "ref":
             x_noisy, noise = self._forward_reflected_noise(x_start, t)
+
         else:
             raise NotImplementedError(f"Must select valid self.diff_type.")
 

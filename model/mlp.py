@@ -22,12 +22,14 @@ class MLP(nn.Module):
             time_emb: str = "sinusoidal", 
             input_emb: str = "sinusoidal",
             diff_type: str = "ddpm",
+            pred_type: str = "eps",
             boundary_tol: float = 0.05,
         ):
 
         super().__init__()
 
         self.diff_type = diff_type
+        self.pred_type = pred_type
         self.boundary_tol = boundary_tol
 
         self.time_mlp = PositionalEmbedding(emb_size, time_emb)
@@ -85,7 +87,7 @@ class MLP(nn.Module):
         if self.diff_type == "ref":
             if self.pred_type == "s":
                 boundary_dist = self._compute_boundary_distance(x_t)
-                x = th.min(1, self.fn(boundary_dist-self.boundary_tol))*x
+                x = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)).reshape(-1, 1)*x
             else:
                 raise ValueError(f"Must use score prediction for reflected diffusion.")
 
