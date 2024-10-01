@@ -70,7 +70,6 @@ def load_and_sync_parameters(args, model, ema_model=None, optimizer=None):
     """
     resume_step = 0
     if args.resume_training:
-
         if args.resume_checkpoint is not "":
             resume_checkpoint = args.resume_checkpoint
         else:
@@ -79,7 +78,7 @@ def load_and_sync_parameters(args, model, ema_model=None, optimizer=None):
         if resume_checkpoint is not None:
             logger.log(f"Found checkpoint: {resume_checkpoint}")
             resume_step = _parse_resume_step_from_filename(resume_checkpoint)
-            resume_checkpoint = th.load(resume_checkpoint, map_location=distribute_util.dev())
+            resume_checkpoint = th.load(resume_checkpoint, map_location=distribute_util.dev(), weights_only=False)
             if dist.get_rank() == 0:
                 logger.log(f"Loading model state...")
                 model.load_state_dict(resume_checkpoint["model"])
@@ -95,7 +94,6 @@ def load_and_sync_parameters(args, model, ema_model=None, optimizer=None):
     if ema_model is not None:
         ema_model = ema_model.to(device=distribute_util.dev())
 
-    if ema_model is not None:
         return resume_step, model, ema_model, optimizer
     else:
         return resume_step, model

@@ -114,7 +114,7 @@ def update_ema(model, ema_model, ema):
             ema_param.data.mul_(ema).add_(model_param.data, alpha=(1 - ema))
 
 
-def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=10):
+def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=50):
     """
     Estimates the divergence term using Hutchinson's estimator.
     
@@ -191,17 +191,34 @@ def get_loss_fn(args):
             return loss_fn
 
         elif args.pred_type == "s": 
-            def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
-                # Ensure noisy requires gradient for autograd to compute the divergence
-                noisy.requires_grad_(True)
-                pred_score = model(noisy, timesteps)
-                # 1/2 ||s_theta(x)||_2^2 (regularization term)
-                norm_term = 0.5*th.sum(pred_score**2, dim=1).mean()
-                # div(s_theta(x)) (Hutchinson divergence estimator)
-                divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
-                # Total ISM loss
-                return norm_term + divergence_term
-            return loss_fn
+            if args.g_equiv and args.g_input == "C5":
+                def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
+                    # Ensure noisy requires gradient for autograd to compute the divergence
+                    noisy.requires_grad_(True)
+                    loss = 0
+                    for k in range(5):
+                        noisy_rot = rot_fn(noisy, 2*th.pi/5.0, k)
+                        pred_score = inv_rot_fn(model(noisy_rot, timesteps), 2*th.pi/5.0, k)
+                        # 1/2 ||s_theta(x)||_2^2 (regularization term)
+                        norm_term = 0.5*th.sum(pred_score**2, dim=1).mean()
+                        # div(s_theta(x)) (Hutchinson divergence estimator)
+                        divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=30)
+                        # Total ISM loss
+                        loss += norm_term + divergence_term
+                    return loss/5.0
+                return loss_fn
+            else:
+                def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
+                    # Ensure noisy requires gradient for autograd to compute the divergence
+                    noisy.requires_grad_(True)
+                    pred_score = model(noisy, timesteps)
+                    # 1/2 ||s_theta(x)||_2^2 (regularization term)
+                    norm_term = 0.5*th.sum(pred_score**2, dim=1).mean()
+                    # div(s_theta(x)) (Hutchinson divergence estimator)
+                    divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
+                    # Total ISM loss
+                    return norm_term + divergence_term
+                return loss_fn
 
     elif args.loss == "dsm":
         # Define the loss function based on g_equiv and pred_type
@@ -214,7 +231,7 @@ def get_loss_fn(args):
                         noisy_rot = rot_fn(noisy, 2 * th.pi / 5.0, k)
                         noise_pred = inv_rot_fn(model(noisy_rot, timesteps), 2 * th.pi / 5.0, k)
                         loss += F.mse_loss(noise_pred, noise)
-                    return loss / 5.0  # Average over the 5 rotations
+                    return loss/5.0  # Average over the 5 rotations
                 return loss_fn
             
             else:
@@ -230,8 +247,8 @@ def get_loss_fn(args):
                 def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
                     loss = 0
                     for k in range(5):
-                        noisy_rot = rot_fn(noisy, 2 * th.pi / 5.0, k)
-                        x_pred = inv_rot_fn(model(noisy_rot, timesteps), 2 * th.pi / 5.0, k)
+                        noisy_rot = rot_fn(noisy, 2*th.pi/5.0, k)
+                        x_pred = inv_rot_fn(model(noisy_rot, timesteps), 2*th.pi/5.0, k)
                         loss += F.mse_loss(x_pred, batch)
                     return loss / 5.0  # Average over the 5 rotations
                 return loss_fn
@@ -244,13 +261,26 @@ def get_loss_fn(args):
                 return loss_fn
                 
         elif args.pred_type == "s": # Predicting the score at time t
-            def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
-                pred_score = model(noisy, timesteps)
-                # Compute analytical score estimate 
-                score = noise_scheduler.get_score_from_pred(noise, noisy, timesteps[0])
-                # Total loss
-                return F.mse_loss(pred_score, score)
-            return loss_fn
+            if args.g_equiv and args.g_input == "C5":
+                def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
+                    loss = 0
+                    for k in range(5):
+                        noisy_rot = rot_fn(noisy, 2*th.pi/5.0, k)
+                        pred_score = inv_rot_fn(model(noisy_rot, timesteps), 2*th.pi/5.0, k)
+                        # Compute analytical score estimate 
+                        score = noise_scheduler.get_score_from_pred(pred_score, noisy, batch, timesteps[0])
+                        # Total loss
+                        loss += F.mse_loss(pred_score, score)
+                    return loss/5.0
+                return loss_fn
+            else:
+                def loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch):
+                    pred_score = model(noisy, timesteps)
+                    # Compute analytical score estimate 
+                    score = noise_scheduler.get_score_from_pred(pred_score, noisy, batch, timesteps[0])
+                    # Total loss
+                    return F.mse_loss(pred_score, score)
+                return loss_fn
                 
         else:
             raise NotImplementedError(f"The option {args.loss} is not supported.")

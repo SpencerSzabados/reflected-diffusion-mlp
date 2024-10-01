@@ -77,7 +77,7 @@ class NoiseScheduler():
 
         return variance
     
-    def get_score_from_pred(self, model_output, x_t, t):
+    def get_score_from_pred(self, model_output, x_t, x_0, t):
         """
         This function converts a noise or x_0 prediction to an estimate of the score at time t.
         This estimate is only valid  for diff_type=="ddpm". (or approximatly valid if for 
@@ -95,15 +95,16 @@ class NoiseScheduler():
 
         if self.diff_type == "ddpm":
             if self.pred_type == "eps":
-                sigmas = self.sqrt_one_minus_alphas_cumprod[t]*padding
-                pred_score = -model_output/(sigmas+1e-20)
+                variance = self.sqrt_one_minus_alphas_cumprod[t]*padding
+                pred_score = -model_output/(variance+1e-20)
 
             elif self.pred_type == "x":
-                pred_score = -(x_t - self.alphas_cumprod[t]*model_output)/(self.sqrt_one_minus_alphas_cumprod**2)
+                variance = (self.sqrt_one_minus_alphas_cumprod[t]**2)*padding
+                pred_score = -(x_t - self.alphas_cumprod[t]*model_output)/(variance+1e-20)
 
             elif self.pred_type == "s":
-                sigmas = self.sqrt_one_minus_alphas_cumprod[t]*padding
-                pred_score = -model_output/(sigmas+1e-20)
+                variance = (1.0-self.alphas_cumprod[t])*padding
+                pred_score = -(x_t - self.sqrt_alphas_cumprod[t]*x_0)/(variance+1e-20)
 
             else:
                 raise NotImplementedError
@@ -118,8 +119,8 @@ class NoiseScheduler():
                 else:
                     step_size = self.betas[t]-self.betas[t-1]
 
-                variance = (step_size*t + 1e-20)*padding
-                pred_score = -(x_t-model_output)/variance
+                variance = (step_size**2)*t*padding
+                pred_score = -(x_t-model_output)/(variance+1e-20)
             else:
                 raise NotImplementedError
         else:
@@ -233,16 +234,6 @@ class NoiseScheduler():
             noise_sample = th.randn_like(x_start)
             noise = noise+step_size*noise_sample
             x_noisy = x_noisy+step_size*noise_sample
-
-        # TODO: Debug - incremental savinging of generated x_noisy
-        #     import matplotlib.pyplot as plt
-        #     frame = x_noisy.detach().cpu().numpy()
-        #     plt.figure(figsize=(4, 4))
-        #     plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-        #     plt.axis('off')
-        #     plt.savefig(f"tmp/x_noise_sample_{k}.png", transparent=True)
-        #     plt.close()
-        # exit()
      
         return x_noisy, noise
     
@@ -258,18 +249,24 @@ class NoiseScheduler():
                 pred_prev_sample =  self.q_posterior(model_output, sample, t)
 
             elif self.pred_type == "s":
+                # pred_prev_sample = (1.0/th.sqrt(self.alphas[t]))*(sample + self.betas[t]*model_output)
                 pred_prev_sample = (1.0/th.sqrt(self.alphas[t]))*(sample + self.betas[t]*model_output)
-
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
             
             variance = 0
             if t > 0:
                 noise = th.randn_like(model_output)
-                variance = (self.get_variance(t)**0.5)*noise
+                # variance = (self.get_variance(t)**0.5)*noise
+                variance = (self.betas[t]**0.5)*noise # TODO: DEBUG - this is added to test sampling performance when estimating score.
             pred_prev_sample = pred_prev_sample + variance
 
         elif self.diff_type == "ref":
+            if t == 0:
+                step_size = self.betas[1]-self.betas[0]
+            else:
+                step_size = self.betas[t]-self.betas[t-1]
+
             if self.pred_type == "eps":
                 pred_original_sample = self.reconstruct_x0(sample, t, model_output)
                 pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
@@ -278,7 +275,7 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = sample + 0.5*(t**0.5)*model_output
+                pred_prev_sample = sample + (th.sqrt(step_size)*t)*model_output
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")

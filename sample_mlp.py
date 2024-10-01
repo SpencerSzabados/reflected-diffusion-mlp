@@ -152,7 +152,8 @@ def main():
                 emb_size=args.emb_size,
                 time_emb=args.time_emb,
                 input_emb=args.input_emb,
-                diff_type=args.diff_type)
+                diff_type=args.diff_type,
+                pred_type=args.pred_type)
 
     noise_scheduler = NoiseScheduler(diff_type=args.diff_type,
                                      pred_type=args.pred_type,
@@ -177,7 +178,6 @@ def main():
                 sample = noise_scheduler.step(residual, t[0], sample)
 
         elif args.diff_type == "ref":
-            if args.pred_type == "x":
                 sample_batch = next(iter(test_loader))[0]
                 sample, noise = noise_scheduler._sample_forwards_reflected_noise(sample_batch)
                 timesteps = list(range(len(noise_scheduler)))[::-1]
@@ -186,9 +186,7 @@ def main():
                     t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
                     residual = model(sample, t).to(distribute_util.dev())
                     sample = noise_scheduler.step(residual, t[0], sample)
-            else:
-                raise NotImplementedError(f"Invalid combination of diff_type and pred_type paramters.")
-            
+        
         else:
             raise NotImplementedError(f"Invalid value for diff_type.")
 
