@@ -257,8 +257,8 @@ class NoiseScheduler():
             variance = 0
             if t > 0:
                 noise = th.randn_like(model_output)
-                # variance = (self.get_variance(t)**0.5)*noise
-                variance = (self.betas[t]**0.5)*noise # TODO: DEBUG - this is added to test sampling performance when estimating score.
+                variance = (self.get_variance(t)**0.5)*noise
+                # variance = (self.betas[t]**0.5)*noise # TODO: DEBUG - this is added to test sampling performance when estimating score.
             pred_prev_sample = pred_prev_sample + variance
 
         elif self.diff_type == "ref":
