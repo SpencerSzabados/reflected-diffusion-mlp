@@ -17,6 +17,7 @@ class NoiseScheduler():
                  diff_type="ddpm",
                  pred_type="eps",
                  num_timesteps=1000,
+                 step_size=0.01,
                  beta_start=0.0001,
                  beta_end=0.02,
                  beta_schedule="linear"):
@@ -24,6 +25,7 @@ class NoiseScheduler():
         self.diff_type = diff_type
         self.pred_type = pred_type
         self.num_timesteps = num_timesteps
+        self.step_size = step_size
 
         if beta_schedule == "linear":
             self.betas = th.linspace(
@@ -114,12 +116,7 @@ class NoiseScheduler():
                 if isinstance(t, th.Tensor):
                     t = t[0] 
 
-                if t == 0:
-                    step_size = self.betas[1]-self.betas[0]
-                else:
-                    step_size = self.betas[t]-self.betas[t-1]
-
-                variance = (step_size**2)*t*padding
+                variance = (self.step_size**2)*t*padding
                 pred_score = -(x_t-model_output)/(variance+1e-20)
             else:
                 raise NotImplementedError
@@ -145,11 +142,12 @@ class NoiseScheduler():
         """
         r_in = 0.25
         r_out = 1.0
+        margin = 0.0
 
         distances = th.linalg.norm(x_t, ord=2, dim=1)
         
         # Determine if distances are within [r_in, r_out]
-        free_idx = (distances >= r_in) & (distances <= r_out)
+        free_idx = (distances >= r_in-margin) & (distances <= r_out+margin)
         coll_idx = ~free_idx
 
         return coll_idx, free_idx
@@ -161,12 +159,6 @@ class NoiseScheduler():
         # TODO: change the way t is passed to this function.
         if isinstance(t, th.Tensor) and t.ndim > 0:
             t = t[0] 
-
-        if t == 0:
-            step_size = self.betas[1]-self.betas[0]
-        else:
-            step_size = self.betas[t]-self.betas[t-1]
-        step_size = th.sqrt(step_size) # TODO: DEBUG using linear (fixed) step size requires a larger number of sampling steps
 
         noise = th.randn_like(x_start)
         x_noisy = x_start
@@ -189,8 +181,8 @@ class NoiseScheduler():
 
             # Resample noise for all trajectories
             noise_sample = th.randn_like(x_start)
-            noise = noise+step_size*noise_sample
-            x_noisy = x_noisy+step_size*noise_sample
+            noise = noise+self.step_size*noise_sample
+            x_noisy = x_noisy+self.step_size*noise_sample
 
         # TODO: Debug - incremental savinging of generated x_noisy
         #     import matplotlib.pyplot as plt
@@ -207,8 +199,6 @@ class NoiseScheduler():
     @th.no_grad()
     def _sample_forwards_reflected_noise(self, x_start):
         # Perform Metropolis-Hastings random walk 
-        step_size = self.betas[1]-self.betas[0]
-        step_size = th.sqrt(step_size) # TODO: DEBUG using linear (fixed) step size requires a larger number of sampling steps
 
         noise = th.randn_like(x_start)
         x_noisy = x_start
@@ -232,8 +222,8 @@ class NoiseScheduler():
 
             # Resample noise for all trajectories
             noise_sample = th.randn_like(x_start)
-            noise = noise+step_size*noise_sample
-            x_noisy = x_noisy+step_size*noise_sample
+            noise = noise+self.step_size*noise_sample
+            x_noisy = x_noisy+self.step_size*noise_sample
      
         return x_noisy, noise
     
@@ -249,7 +239,6 @@ class NoiseScheduler():
                 pred_prev_sample =  self.q_posterior(model_output, sample, t)
 
             elif self.pred_type == "s":
-                # pred_prev_sample = (1.0/th.sqrt(self.alphas[t]))*(sample + self.betas[t]*model_output)
                 pred_prev_sample = (1.0/th.sqrt(self.alphas[t]))*(sample + self.betas[t]*model_output)
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
@@ -258,15 +247,9 @@ class NoiseScheduler():
             if t > 0:
                 noise = th.randn_like(model_output)
                 variance = (self.get_variance(t)**0.5)*noise
-                # variance = (self.betas[t]**0.5)*noise # TODO: DEBUG - this is added to test sampling performance when estimating score.
             pred_prev_sample = pred_prev_sample + variance
 
         elif self.diff_type == "ref":
-            if t == 0:
-                step_size = self.betas[1]-self.betas[0]
-            else:
-                step_size = self.betas[t]-self.betas[t-1]
-
             if self.pred_type == "eps":
                 pred_original_sample = self.reconstruct_x0(sample, t, model_output)
                 pred_prev_sample = self.q_posterior(pred_original_sample, sample, t)
@@ -275,25 +258,17 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = sample + (th.sqrt(step_size)*t)*model_output
+                pred_prev_sample = sample + (self.step_size)*model_output
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
             
             noise = 0
+            noisy = 0
             if t > 0:
-                noisy, noise = self._forward_reflected_noise(pred_prev_sample, t)
-            pred_prev_sample = pred_prev_sample + noise
-
-        # TODO: Debug - incremental savinging of generated x_noisy
-        # import matplotlib.pyplot as plt
-        # frame = pred_prev_sample.detach().cpu().numpy()
-        # plt.figure(figsize=(4, 4))
-        # plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-        # plt.axis('off')
-        # plt.savefig(f"tmp/x_denoise_sample_{t}.png", transparent=True)
-        # plt.close()
-        # exit()
+                noisy, noise = self._forward_reflected_noise(pred_prev_sample, 1)
+                # noise = th.randn_like(pred_prev_sample)
+            pred_prev_sample = pred_prev_sample + (step_size**2)*noisy
 
         return pred_prev_sample
 

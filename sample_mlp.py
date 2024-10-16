@@ -70,6 +70,7 @@ def create_argparser():
         time_emb="sinusoidal",
         input_emb="sinusoidal",
         num_timesteps=50,
+        step_size=0.01,
         beta_start=0.0001,
         beta_end=0.02,
         beta_schedule="linear",
@@ -120,7 +121,7 @@ def main():
     os.makedirs(f"{outdir}/images/", exist_ok=True)
 
     distribute_util.setup_dist()
-    logger.configure(dir=outdir)
+    logger.configure(dir=outdir, log_suffix="sampling")
 
     time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.log(f"[{time}]"+"="*20+"\nJob started.")
@@ -181,11 +182,23 @@ def main():
                 sample_batch = next(iter(test_loader))[0]
                 sample, noise = noise_scheduler._sample_forwards_reflected_noise(sample_batch)
                 timesteps = list(range(len(noise_scheduler)))[::-1]
+                
                 for i, t in enumerate(tqdm(timesteps)):
                     sample = sample.to(distribute_util.dev())
+
+                    # TODO: debug - remove. This was added to plot denosing sequence 
+                    if t >= 950:
+                        frame = sample.detach().cpu().numpy()
+                        plt.figure(figsize=(8, 8))
+                        plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+                        plt.axis('off')
+                        plt.savefig(f"{outdir}/images/{args.exps}_debug_sample_{t}.png", transparent=True)
+                        plt.close()
+     
                     t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
                     residual = model(sample, t).to(distribute_util.dev())
-                    sample = noise_scheduler.step(residual, t[0], sample)
+                    sample = noise_scheduler.step(residual, t[0], sample) # TODO: Debug - maybe the time index is misaligned between the forwards and backwards pass due to passing t as the loop range when it should be t+1?
+
         
         else:
             raise NotImplementedError(f"Invalid value for diff_type.")

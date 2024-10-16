@@ -63,19 +63,21 @@ def create_argparser():
         eqv_reg=False,     # False, True 
         loss="dsm",        # dsm, ism
         diff_type='pfode', # pfode, ddpm, ref
-        pred_type='eps',   # epx, x
+        pred_type='eps',   # eps, x, s
         hidden_layers=3,
         hidden_size=128,
         emb_size=128,
         time_emb="sinusoidal",
         input_emb="sinusoidal",
         num_timesteps=50,
+        step_size=0.01,
         beta_start=0.0001,
         beta_end=0.02,
         beta_schedule="linear",
         schedule_sampler="uniform",
         lr=1e-4,
         weight_decay=0.0,
+        weight_lambda=False,
         ema=0.994,
         ema_interval=1,
         lr_anneal_steps=0,
@@ -217,7 +219,7 @@ def get_loss_fn(args):
                     noisy.requires_grad_(True)
                     pred_score = model(noisy, timesteps)
                     # 1/2 ||s_theta(x)||_2^2 (regularization term)
-                    norm_term = 0.5*th.sum(score_w*pred_score**2, dim=1).mean()
+                    norm_term = 0.5*th.sum(score_w*(pred_score**2), dim=1).mean()
                     # div(s_theta(x)) (Hutchinson divergence estimator)
                     divergence_term = score_w*hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
                     # Total ISM loss
@@ -322,11 +324,12 @@ def main():
 
     time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.log(f"[{time}]"+"="*20+"\nJob started.")
-    logger.log(f"Experiment: {args.exps}")
-    logger.log(f"diff_type: {args.diff_type}")
-    logger.log(f"pred_type: {args.pred_type}")
-    logger.log(f"loss: {args.loss}")
-    logger.log(f"Number of timesteps: {args.num_timesteps}\n")
+    logger.log(f"Experiment: {args.exps}\n")
+    
+    # Log all args to the log file
+    for arg in vars(args):
+        value = getattr(args, arg)
+        logger.log(f"{arg}: {value}")
 
     logger.log(f"Setting and loading constants...")
     global_step = 0
@@ -358,10 +361,12 @@ def main():
                                      pred_type=args.pred_type,
                                      beta_start=args.beta_start,
                                      beta_end=args.beta_end,
+                                     step_size=args.step_size,
                                      num_timesteps=args.num_timesteps,
                                      beta_schedule=args.beta_schedule)
 
     
+    logger.log("Creating optimizer...")
     # Get the loss function (ISM or MSE) based on args.loss
     loss_w = 1.0
     score_w = 1.0
@@ -408,6 +413,11 @@ def main():
                     div = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
                     # estimate score of score
                     score_w = -div/norm
+
+            # Add loss weighting function loss_w=(t+1)
+            if args.weight_lambda:
+                with th.no_grad():
+                    loss_w = (timesteps[0]+1.0).to(distribute_util.dev())
 
             # Compute loss
             optimizer.zero_grad()

@@ -83,7 +83,6 @@ class MLP(nn.Module):
         x_t_emb = th.cat((x1_emb, x2_emb, t_emb), dim=-1)
         x = self.joint_mlp(x_t_emb)
 
-        # TODO: This code needs to be debugged.
         if self.diff_type == "ref":
             if self.pred_type == "s":
                 boundary_dist = self._compute_boundary_distance(x_t)
