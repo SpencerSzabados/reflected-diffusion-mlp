@@ -268,7 +268,7 @@ class NoiseScheduler():
             if t > 0:
                 noisy, noise = self._forward_reflected_noise(pred_prev_sample, 1)
                 # noise = th.randn_like(pred_prev_sample)
-            pred_prev_sample = pred_prev_sample + (step_size**2)*noisy
+            pred_prev_sample = pred_prev_sample + (self.step_size**2)*noisy
 
         return pred_prev_sample
 
