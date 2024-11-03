@@ -70,7 +70,7 @@ def create_argparser():
         time_emb="sinusoidal",
         input_emb="sinusoidal",
         num_timesteps=50,
-        step_size=0.01,
+        step_size=None,    # None, fixed int
         beta_start=0.0001,
         beta_end=0.02,
         beta_schedule="linear",

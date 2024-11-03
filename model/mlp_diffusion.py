@@ -14,10 +14,10 @@ class NoiseScheduler():
     for the ddpm discrete diffusion setting. 
     """
     def __init__(self,
-                 diff_type="ddpm",
-                 pred_type="eps",
+                 diff_type="ddpm", # ddpm, ref
+                 pred_type="eps",  # eps, x, s
                  num_timesteps=1000,
-                 step_size=0.01,
+                 step_size=None,   # None, fixed integer
                  beta_start=0.0001,
                  beta_end=0.02,
                  beta_schedule="linear"):
@@ -25,8 +25,8 @@ class NoiseScheduler():
         self.diff_type = diff_type
         self.pred_type = pred_type
         self.num_timesteps = num_timesteps
-        self.step_size = step_size
 
+        # Diffusion schedule 
         if beta_schedule == "linear":
             self.betas = th.linspace(
                 beta_start, beta_end, num_timesteps, dtype=th.float32)
@@ -39,18 +39,26 @@ class NoiseScheduler():
         self.alphas_cumprod_prev = F.pad(
             self.alphas_cumprod[:-1], (1, 0), value=1.)
 
-        # required for self.add_noise
+        # Required for self.add_noise
         self.sqrt_alphas_cumprod = self.alphas_cumprod ** 0.5
         self.sqrt_one_minus_alphas_cumprod = (1 - self.alphas_cumprod) ** 0.5
 
-        # required for reconstruct_x0
+        # Required for reconstruct_x0
         self.sqrt_inv_alphas_cumprod = th.sqrt(1 / self.alphas_cumprod)
         self.sqrt_inv_alphas_cumprod_minus_one = th.sqrt(
             1 / self.alphas_cumprod - 1)
 
-        # required for q_posterior
+        # Required for q_posterior
         self.posterior_mean_coef1 = self.betas * th.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
         self.posterior_mean_coef2 = (1. - self.alphas_cumprod_prev) * th.sqrt(self.alphas) / (1. - self.alphas_cumprod)
+
+        # Step size
+        if step_size is None:
+            self.eta_x = th.ones((num_timesteps,))
+            self.eta_z = self.alphas
+        else:
+            self.eta_z = th.full((num_timesteps,), step_size)
+            self.eta_x = th.ones((num_timesteps,))
 
     def reconstruct_x0(self, x_t, t, noise):
         assert(x_t.device == noise.device)
@@ -115,7 +123,7 @@ class NoiseScheduler():
             if self.pred_type == "x":
                 if isinstance(t, th.Tensor):
                     t = t[0] 
-
+                # TODO: This score predictor seems to only denoise upto a certain point, and never recovers the original data.
                 variance = (self.step_size**2)*t*padding
                 pred_score = -(x_t-model_output)/(variance+1e-20)
             else:
@@ -142,7 +150,7 @@ class NoiseScheduler():
         """
         r_in = 0.25
         r_out = 1.0
-        margin = 0.0
+        margin = 0.05
 
         distances = th.linalg.norm(x_t, ord=2, dim=1)
         
@@ -181,8 +189,8 @@ class NoiseScheduler():
 
             # Resample noise for all trajectories
             noise_sample = th.randn_like(x_start)
-            noise = noise+self.step_size*noise_sample
-            x_noisy = x_noisy+self.step_size*noise_sample
+            noise = noise + self.eta_z[k]*noise_sample
+            x_noisy = self.eta_x[k]*x_noisy + self.eta_z[k]*noise_sample
 
         # TODO: Debug - incremental savinging of generated x_noisy
         #     import matplotlib.pyplot as plt
@@ -207,7 +215,7 @@ class NoiseScheduler():
         previous_x_noisy = x_noisy.clone()
 
         # Perform accept-reject based on local geometry
-        for k in range(self.num_timesteps):
+        for t in range(self.num_timesteps):
             coll_idx, free_idx = self._compute_collisions(x_noisy)  
             
             # If there are collisions, revert the changes for collided indices
@@ -222,8 +230,8 @@ class NoiseScheduler():
 
             # Resample noise for all trajectories
             noise_sample = th.randn_like(x_start)
-            noise = noise+self.step_size*noise_sample
-            x_noisy = x_noisy+self.step_size*noise_sample
+            noise = noise + self.eta_z[t]*noise_sample
+            x_noisy = self.eta_x[t]*x_noisy + self.eta_z[t]*noise_sample
      
         return x_noisy, noise
     
@@ -258,7 +266,7 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = sample + (self.step_size)*model_output
+                pred_prev_sample = (1.0/th.sqrt(self.alphas[t]))*(sample + (self.eta_x[t])*model_output) # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
@@ -268,7 +276,7 @@ class NoiseScheduler():
             if t > 0:
                 noisy, noise = self._forward_reflected_noise(pred_prev_sample, 1)
                 # noise = th.randn_like(pred_prev_sample)
-            pred_prev_sample = pred_prev_sample + (self.step_size**2)*noisy
+            pred_prev_sample = pred_prev_sample + self.eta_z[t]*noise # TODO: verify this noise needs to be scaled or not
 
         return pred_prev_sample
 

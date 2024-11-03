@@ -70,7 +70,7 @@ def create_argparser():
         time_emb="sinusoidal",
         input_emb="sinusoidal",
         num_timesteps=50,
-        step_size=0.01,
+        step_size=None,
         beta_start=0.0001,
         beta_end=0.02,
         beta_schedule="linear",
@@ -156,10 +156,12 @@ def main():
                 diff_type=args.diff_type,
                 pred_type=args.pred_type)
 
+    
     noise_scheduler = NoiseScheduler(diff_type=args.diff_type,
                                      pred_type=args.pred_type,
                                      beta_start=args.beta_start,
                                      beta_end=args.beta_end,
+                                     step_size=args.step_size,
                                      num_timesteps=args.num_timesteps,
                                      beta_schedule=args.beta_schedule)
 
@@ -187,19 +189,17 @@ def main():
                     sample = sample.to(distribute_util.dev())
 
                     # TODO: debug - remove. This was added to plot denosing sequence 
-                    if t >= 950:
-                        frame = sample.detach().cpu().numpy()
-                        plt.figure(figsize=(8, 8))
-                        plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-                        plt.axis('off')
-                        plt.savefig(f"{outdir}/images/{args.exps}_debug_sample_{t}.png", transparent=True)
-                        plt.close()
+                    frame = sample.detach().cpu().numpy()
+                    plt.figure(figsize=(8, 8))
+                    plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+                    plt.axis('off')
+                    plt.savefig(f"{outdir}/images/{args.exps}_debug_sample_{t}.png", transparent=True)
+                    plt.close()
      
                     t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
                     residual = model(sample, t).to(distribute_util.dev())
                     sample = noise_scheduler.step(residual, t[0], sample) # TODO: Debug - maybe the time index is misaligned between the forwards and backwards pass due to passing t as the loop range when it should be t+1?
 
-        
         else:
             raise NotImplementedError(f"Invalid value for diff_type.")
 

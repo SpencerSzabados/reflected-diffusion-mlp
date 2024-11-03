@@ -23,7 +23,7 @@ class MLP(nn.Module):
             input_emb: str = "sinusoidal",
             diff_type: str = "ddpm",
             pred_type: str = "eps",
-            boundary_tol: float = 0.05,
+            boundary_tol: float = 0.005,
         ):
 
         super().__init__()
@@ -87,8 +87,5 @@ class MLP(nn.Module):
             if self.pred_type == "s":
                 boundary_dist = self._compute_boundary_distance(x_t)
                 x = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)).reshape(-1, 1)*x
-            else:
-                raise ValueError(f"Must use score prediction for reflected diffusion.")
 
-        
         return x
