@@ -17,7 +17,7 @@ class NoiseScheduler():
                  diff_type="ddpm", # ddpm, ref
                  pred_type="eps",  # eps, x, s
                  num_timesteps=1000,
-                 step_size=None,   # None, fixed integer
+                 step_size=-1.0,   # None, fixed integer
                  beta_start=0.0001,
                  beta_end=0.02,
                  beta_schedule="linear"):
@@ -53,12 +53,13 @@ class NoiseScheduler():
         self.posterior_mean_coef2 = (1. - self.alphas_cumprod_prev) * th.sqrt(self.alphas) / (1. - self.alphas_cumprod)
 
         # Step size
-        if step_size is None:
-            self.eta_x = th.ones((num_timesteps,))
-            self.eta_z = self.alphas
+        if step_size == -1:
+            self.eta_x = th.sqrt(self.alphas)
+            self.eta_z = th.sqrt(1.0-self.alphas)
         else:
-            self.eta_z = th.full((num_timesteps,), step_size)
             self.eta_x = th.ones((num_timesteps,))
+            self.eta_z = th.full((num_timesteps,), step_size)
+            
 
     def reconstruct_x0(self, x_t, t, noise):
         assert(x_t.device == noise.device)

@@ -1,0 +1,27 @@
+Logging to /home/sszabados/models/reflected-diffusion-mlp/exps/test_ref_noise
+[2024-11-04 12:44:59]====================
+Job started.
+Experiment: test_ref_noise
+
+exps: test_ref_noise
+working_dir: /home/sszabados/models/reflected-diffusion-mlp
+data_dir: /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz
+diff_type: ref
+pred_type: s
+num_timesteps: 100
+step_size: 0.015
+beta_start: 0.0001
+beta_end: 0.02
+beta_schedule: linear
+schedule_sampler: uniform
+global_batch_size: 10000
+global_sample_size: 100000
+batch_size: -1
+user_id: dummy
+slurm_id: -1
+Setting and loading constants...
+Creating data loader...
+Creating noise scheduler...
+[2024-11-04 12:44:59]====================
+Sampling from model...
+

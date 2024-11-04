@@ -23,7 +23,7 @@ class MLP(nn.Module):
             input_emb: str = "sinusoidal",
             diff_type: str = "ddpm",
             pred_type: str = "eps",
-            boundary_tol: float = 0.005,
+            boundary_tol: float = 0.05,
         ):
 
         super().__init__()

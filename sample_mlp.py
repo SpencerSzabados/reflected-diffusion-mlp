@@ -70,7 +70,7 @@ def create_argparser():
         time_emb="sinusoidal",
         input_emb="sinusoidal",
         num_timesteps=50,
-        step_size=None,
+        step_size=-1.0,
         beta_start=0.0001,
         beta_end=0.02,
         beta_schedule="linear",
@@ -189,12 +189,12 @@ def main():
                     sample = sample.to(distribute_util.dev())
 
                     # TODO: debug - remove. This was added to plot denosing sequence 
-                    frame = sample.detach().cpu().numpy()
-                    plt.figure(figsize=(8, 8))
-                    plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-                    plt.axis('off')
-                    plt.savefig(f"{outdir}/images/{args.exps}_debug_sample_{t}.png", transparent=True)
-                    plt.close()
+                    # frame = sample.detach().cpu().numpy()
+                    # plt.figure(figsize=(8, 8))
+                    # plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+                    # plt.axis('off')
+                    # plt.savefig(f"{outdir}/images/{args.exps}_debug_sample_{t}.png", transparent=True)
+                    # plt.close()
      
                     t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
                     residual = model(sample, t).to(distribute_util.dev())
