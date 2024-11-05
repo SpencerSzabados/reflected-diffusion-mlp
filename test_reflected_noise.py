@@ -6,7 +6,7 @@
     Script is based on sample_mlp.py
 
     Example command:
-    CUDA_VISIBLE_DEVICES=1 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python test_reflected_noise.py --exps test_ref_noise --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --diff_type ref --pred_type s --num_timesteps 100 --beta_start 0.0001 --beta_end 0.02
+    CUDA_VISIBLE_DEVICES=2 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python test_reflected_noise.py --exps test_ref_noise --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --diff_type ref --pred_type s --num_timesteps 100 --beta_start 0.0001 --beta_end 0.02
 """
 
 
