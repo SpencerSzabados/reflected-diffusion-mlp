@@ -1,6 +1,7 @@
 """
     This file contains scripts for testing the accuracy of the implemented Hutchison divergence
-    estiamted code used in training reflected mlp diffusion.
+    estiamted code used in training reflected mlp diffusion. Both the standard Guassian and 
+    Rademacher distributions are supported for testing the difference in divergence estimate.
 """
 
 import torch
@@ -27,7 +28,7 @@ def analytical_divergence(x):
     return divergence  # shape [batch_size]
 
 
-def hutchinson_divergence(f, x, num_samples=1000):
+def hutchinson_divergence(f, x, num_samples=1000, type="Guassian"):
     """
     Estimates the divergence of function f at points x using Hutchinson's estimator.
 
@@ -43,7 +44,12 @@ def hutchinson_divergence(f, x, num_samples=1000):
     divergence_estimates = torch.zeros(batch_size, device=x.device)
 
     for _ in range(num_samples):
-        z = torch.randn_like(x)  # Sample z ~ N(0, I) 
+        if type == "Guassian":
+            z = torch.randn_like(x)  # Sample z ~ N(0, I) 
+        elif type == "Rademacher":
+            z = torch.randint_like(x, low=0, high=2).float()*2 - 1.
+        else:
+            raise NotImplementedError
         f_x = f(x)  # Compute f(x)
         # Compute the dot product z^T (∇_x f(x))
         grad_f_x = torch.autograd.grad(
@@ -109,7 +115,8 @@ def main():
     analytical_div = analytical_divergence(grid_points).detach().numpy()  # Shape [2500]
 
     # Compute estimated divergence
-    estimated_div = hutchinson_divergence_sum(test_function, grid_points, num_samples=20).detach().numpy()
+    # estimated_div = hutchinson_divergence_sum(test_function, grid_points, num_samples=20).detach().numpy()
+    estimated_div = hutchinson_divergence(test_function, grid_points, num_samples=30, type="Rademacher").detach().numpy()
 
     # Compute absolute error
     error = np.abs(estimated_div - analytical_div)
@@ -126,7 +133,7 @@ def main():
     plt.title('Error between Analytical and Estimated Divergence')
     plt.xlabel('x')
     plt.ylabel('y')
-    plt.savefig(f"tmp/test_hutchison_sum.png", transparent=True)
+    plt.savefig(f"tmp/test_hutchison.png", transparent=True)
     plt.close()
 
 

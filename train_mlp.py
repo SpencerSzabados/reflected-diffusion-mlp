@@ -58,12 +58,14 @@ def create_argparser():
         exps="mlp",
         working_dir="",
         data_dir="",
-        g_equiv=False,     # False, True
-        g_input=None,      # None, C5
-        eqv_reg=False,     # False, True 
-        loss="dsm",        # dsm, ism
-        diff_type='pfode', # pfode, ddpm, ref
-        pred_type='eps',   # eps, x, s
+        g_equiv=False,      # False, True
+        g_input=None,       # None, C5
+        eqv_reg=False,      # False, True 
+        loss="dsm",         # dsm, ism
+        diff_type='pfode',  # pfode, ddpm, ref
+        pred_type='eps',    # eps, x, s
+        div_num_samples=50, # Number of samples used to estimate ism divergence term
+        div_distribution="Guassian", # Guassian, Rademacher
         hidden_layers=3,
         hidden_size=128,
         emb_size=128,
@@ -119,7 +121,7 @@ def update_ema(model, ema_model, ema):
             ema_param.data.mul_(ema).add_(model_param.data, alpha=(1 - ema))
 
 
-def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=50):
+def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=50, type="Guassian"):
     """
     Estimates the divergence term using Hutchinson's estimator.
     
@@ -137,7 +139,12 @@ def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_sa
 
     for _ in range(num_samples):
         # Sample random noise for Hutchinson's estimator
-        z = th.randn_like(noisy)
+        if type == "Guassian":
+            z = th.randn_like(noisy)
+        elif type == "Rademacher":
+            z = th.randint_like(noisy, low=0, high=2).float()*2 - 1.
+        else:
+            raise NotImplementedError(f"Only Guassian and Rademacher Type distributions are currently supported.")
 
         if args.pred_type == "eps":
             # Predict the noise (epsilon) using the model
@@ -190,7 +197,7 @@ def get_loss_fn(args):
                 # 1/2 ||s_theta(x)||_2^2 (regularization term)
                 norm_term = 0.5*th.sum(pred_score**2, dim=1).mean()
                 # div(s_theta(x)) (Hutchinson divergence estimator)
-                divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
+                divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
                 # Total ISM loss
                 return norm_term + divergence_term
             return loss_fn
@@ -207,7 +214,7 @@ def get_loss_fn(args):
                         # 1/2 ||s_theta(x)||_2^2 (regularization term)
                         norm_term = 0.5*th.sum(score_w*pred_score**2, dim=1).mean()
                         # div(s_theta(x)) (Hutchinson divergence estimator)
-                        divergence_term = score_w*hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=30)
+                        divergence_term = score_w*hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
                         # Total ISM loss
                         loss += norm_term + divergence_term
                     loss = loss_w*loss/5.0
@@ -221,7 +228,7 @@ def get_loss_fn(args):
                     # 1/2 ||s_theta(x)||_2^2 (regularization term)
                     norm_term = 0.5*th.sum(score_w*(pred_score**2), dim=1).mean()
                     # div(s_theta(x)) (Hutchinson divergence estimator)
-                    divergence_term = score_w*hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
+                    divergence_term = score_w*hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
                     # Total ISM loss
                     loss = loss_w*(norm_term + divergence_term) 
                     return loss 
@@ -410,7 +417,7 @@ def main():
                     # 1/2 ||s_theta(x)||_2^2 (regularization term)
                     norm = 0.5*th.sum(pred_score**2, dim=1).mean()
                     # div(s_theta(x)) (Hutchinson divergence estimator)
-                    div = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler)
+                    div = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
                     # estimate score of score
                     score_w = -div/norm
 
