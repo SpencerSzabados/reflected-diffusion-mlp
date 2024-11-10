@@ -58,7 +58,7 @@ class NoiseScheduler():
             self.eta_z = th.sqrt(1.0-self.alphas)
         else:
             self.eta_x = th.ones((num_timesteps,))
-            self.eta_z = th.full((num_timesteps,), step_size)
+            self.eta_z = th.full((num_timesteps,), th.sqrt(th.tensor(step_size)))
             
 
     def reconstruct_x0(self, x_t, t, noise):
@@ -156,7 +156,7 @@ class NoiseScheduler():
         distances = th.linalg.norm(x_t, ord=2, dim=1)
         
         # Determine if distances are within [r_in, r_out]
-        free_idx = (distances >= r_in-margin) & (distances <= r_out+margin)
+        free_idx = (distances >= r_in+margin) & (distances <= r_out-margin)
         coll_idx = ~free_idx
 
         return coll_idx, free_idx

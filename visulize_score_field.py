@@ -1,9 +1,10 @@
 """
-    Script for sampling from a mlp diffusion model on point data.
+    Script for visualizing the score vector filed of a trained dsm diffusion
+    model over point data. Returns a sequence of plots of the score as it
+    transports points from p_T to p_0.
 
     Example launch command:
-    CUDA_VISIBLE_DEVICES=1 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python sample_mlp.py --exps mlp_anulus_ddpm_dsm_x --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --g_equiv False --diff_type ddpm --loss dsm --pred_type x --resume_checkpoint /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ddpm_dsm_x/checkpoint_500000.pth
-    CUDA_VISIBLE_DEVICES=1 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python sample_mlp.py --exps mlp_anulus_ref_dsm_x_1000step_0.00105h --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --g_equiv False --diff_type ref --loss dsm --pred_type x --num_timesteps 1000 --step_size 0.0015 --beta_start 0.001 --beta_end 1.0 --resume_checkpoint /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ref_dsm_x_1000step_0.00105h/checkpoint_300000.pth
+    
 """
 
 import os
@@ -178,41 +179,29 @@ def main():
             for i, t in enumerate(tqdm(timesteps)):
                 sample = sample.to(distribute_util.dev())
                 t = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
-                residual = model(sample, t).to(distribute_util.dev())
-                sample = noise_scheduler.step(residual, t[0], sample)
-
-        elif args.diff_type == "ref":
-                sample_batch = next(iter(test_loader))[0]
-                sample, noise = noise_scheduler._sample_forwards_reflected_noise(sample_batch)
-                timesteps = list(range(len(noise_scheduler)))[::-1]
+                score = model(sample, t).to(distribute_util.dev())
+                sample = noise_scheduler.step(score, t[0], sample)
                 
-                for i, t in enumerate(tqdm(timesteps)):
-                    sample = sample.to(distribute_util.dev())
-
-                    # TODO: debug - remove. This was added to plot denosing sequence 
-                    frame = sample.detach().cpu().numpy()
+                # Plot the score field every 20th step.
+                if i%20 == 0:
+                    # Create the plot
+                    sample_cpu = sample.detach().cpu().numpy()
+                    score_cpu = score.detach().cpu().numpy()
                     plt.figure(figsize=(8, 8))
-                    plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-                    plt.axis('off')
-                    plt.savefig(f"{outdir}/images/{args.exps}_debug_sample_{t}.png", transparent=True)
+                    plt.quiver(
+                        sample_cpu[:, 0], sample_cpu[:, 1], # Positions
+                        score_cpu[:, 0], score_cpu[:, 1],   # Score vectors
+                        angles='xy', scale_units='xy', scale=1, color='blue', alpha=0.6
+                    )
+                    plt.axis('equal')
+                    plt.grid(True)
+                    plt.savefig(f"{outdir}/images/{args.exps}_score_sample_{i}.png", transparent=True)
                     plt.close()
-     
-                    t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
-                    residual = model(sample, t).to(distribute_util.dev())
-                    sample = noise_scheduler.step(residual, t[0], sample) # TODO: Debug - maybe the time index is misaligned between the forwards and backwards pass due to passing t as the loop range when it should be t+1?
+                    logger.log(f"Saved plot to {outdir}/images/{args.exps}_score_sample_{i}.png")
 
         else:
             raise NotImplementedError(f"Invalid value for diff_type.")
 
-        frame = sample.detach().cpu().numpy()
-
-        logger.log("Saving plot...")
-        plt.figure(figsize=(8, 8))
-        plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-        plt.axis('off')
-        plt.savefig(f"{outdir}/images/{args.exps}_sample.png", transparent=True)
-        plt.close()
-        logger.log(f"Saved plot to {outdir}/images/{args.exps}_sample.png")
 
 if __name__ == "__main__":
     main()

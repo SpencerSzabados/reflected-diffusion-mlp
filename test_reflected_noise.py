@@ -142,17 +142,26 @@ def main():
         sample_batch = next(iter(test_loader))[0]
         timesteps = list(range(len(noise_scheduler)))[::-1]
         
-        for t in tqdm(range(args.num_timesteps)):
-            noise = th.randn_like(sample_batch)
-            sample = noise_scheduler.add_noise(sample_batch, noise, t)
-  
-            # Save incremental frames
-            frame = sample.detach().cpu().numpy()
-            plt.figure(figsize=(8, 8))
-            plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-            plt.axis('off')
-            plt.savefig(f"{outdir}/images/{args.exps}_debug_ref_xnoisy_sample_{t}.png", transparent=True)
-            plt.close()
+        # for t in tqdm(range(args.num_timesteps)):
+        t = timesteps[0]
+        noise = th.randn_like(sample_batch)
+        sample = noise_scheduler.add_noise(sample_batch, noise, t)
+
+            # # Save incremental frames
+            # frame = sample.detach().cpu().numpy()
+            # plt.figure(figsize=(8, 8))
+            # plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+            # plt.axis('off')
+            # plt.savefig(f"{outdir}/images/{args.exps}_debug_ref_xnoisy_sample_{t}.png", transparent=True)
+            # plt.close()
+
+        # Save incremental frames
+        frame = sample.detach().cpu().numpy()
+        plt.figure(figsize=(8, 8))
+        plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+        plt.axis('off')
+        plt.savefig(f"{outdir}/images/{args.exps}_debug_ref_{args.num_timesteps}steps_xnoisy_sample_{t}.png", transparent=True)
+        plt.close()
 
         
 if __name__ == "__main__":
