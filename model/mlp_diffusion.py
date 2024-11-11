@@ -152,7 +152,7 @@ class NoiseScheduler():
         """
         r_in = 0.25
         r_out = 1.0
-        margin = 0.05
+        margin = 0.07
 
         distances = th.linalg.norm(x_t, ord=2, dim=1)
         
@@ -278,7 +278,7 @@ class NoiseScheduler():
             if t > 0:
                 noisy, noise = self._forward_reflected_noise(pred_prev_sample, 1)
                 # noise = th.randn_like(pred_prev_sample)
-            pred_prev_sample = pred_prev_sample + self.eta_z[t]*noise
+            pred_prev_sample = pred_prev_sample # + self.eta_z[t]*noise
 
         return pred_prev_sample
 

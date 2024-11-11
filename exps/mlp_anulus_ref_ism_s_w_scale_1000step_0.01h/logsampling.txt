@@ -1,5 +1,5 @@
 Logging to /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ref_ism_s_w_scale_1000step_0.01h
-[2024-10-28 22:46:45]====================
+[2024-11-11 14:46:58]====================
 Job started.
 Experiment: mlp_anulus_ref_ism_s_w_scale_1000step_0.01h
 diff_type: ref
@@ -12,6 +12,8 @@ Creating data loader...
 Creating model and noise scheduler...
 Found checkpoint: /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ref_ism_s_w_scale_1000step_0.01h/checkpoint_500000.pth
 Loading model state...
-[2024-10-28 22:46:46]====================
+[2024-11-11 14:46:58]====================
 Sampling from model...
 
+Saving plot...
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ref_ism_s_w_scale_1000step_0.01h/images/mlp_anulus_ref_ism_s_w_scale_1000step_0.01h_sample.png
