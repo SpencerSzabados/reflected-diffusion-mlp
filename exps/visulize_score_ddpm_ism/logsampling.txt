@@ -1,0 +1,23 @@
+Logging to /home/sszabados/models/reflected-diffusion-mlp/exps/visulize_score_ddpm_ism
+[2024-11-11 13:24:58]====================
+Job started.
+Experiment: visulize_score_ddpm_ism
+diff_type: ddpm
+pred_type: s
+loss: ism
+Number of timesteps: 50
+
+Setting and loading constants...
+Creating data loader...
+Creating model and noise scheduler...
+Found checkpoint: /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ddpm_ism_s_w_scale/checkpoint_500000.pth
+Loading model state...
+[2024-11-11 13:24:58]====================
+Sampling from model...
+
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/visulize_score_ddpm_ism/images/visulize_score_ddpm_ism_score_sample_0.png
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/visulize_score_ddpm_ism/images/visulize_score_ddpm_ism_score_sample_10.png
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/visulize_score_ddpm_ism/images/visulize_score_ddpm_ism_score_sample_20.png
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/visulize_score_ddpm_ism/images/visulize_score_ddpm_ism_score_sample_30.png
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/visulize_score_ddpm_ism/images/visulize_score_ddpm_ism_score_sample_40.png
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/visulize_score_ddpm_ism/images/visulize_score_ddpm_ism_score_sample_49.png

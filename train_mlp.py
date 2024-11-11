@@ -165,6 +165,7 @@ def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_sa
                                            create_graph=True,
                                            retain_graph=True  # Set to True if you need to compute higher-order derivatives
                                         )[0]
+        grad_pred_score.detach()
         # Compute the Hutchinson divergence estimate for this sample
         divergence_sample = th.einsum('bi,bi->b', grad_pred_score, z)
         divergence += divergence_sample
@@ -198,6 +199,7 @@ def get_loss_fn(args):
                 norm_term = 0.5*th.sum(pred_score**2, dim=1).mean()
                 # div(s_theta(x)) (Hutchinson divergence estimator)
                 divergence_term = hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
+                noisy.requires_grad_(False)
                 # Total ISM loss
                 return norm_term + divergence_term
             return loss_fn
@@ -217,6 +219,7 @@ def get_loss_fn(args):
                         divergence_term = score_w*hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
                         # Total ISM loss
                         loss += norm_term + divergence_term
+                    noisy.requires_grad_(False)
                     loss = loss_w*loss/5.0
                     return loss
                 return loss_fn
@@ -229,6 +232,7 @@ def get_loss_fn(args):
                     norm_term = 0.5*th.sum(score_w*(pred_score**2), dim=1).mean()
                     # div(s_theta(x)) (Hutchinson divergence estimator)
                     divergence_term = score_w*hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
+                    noisy.requires_grad_(False)
                     # Total ISM loss
                     loss = loss_w*(norm_term + divergence_term) 
                     return loss 

@@ -1,0 +1,19 @@
+Logging to /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ddpm_ism_s_w_scale
+[2024-11-11 13:10:19]====================
+Job started.
+Experiment: mlp_anulus_ddpm_ism_s_w_scale
+diff_type: ddpm
+pred_type: s
+loss: ism
+Number of timesteps: 50
+
+Setting and loading constants...
+Creating data loader...
+Creating model and noise scheduler...
+Found checkpoint: /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ddpm_ism_s_w_scale/checkpoint_500000.pth
+Loading model state...
+[2024-11-11 13:10:19]====================
+Sampling from model...
+
+Saving plot...
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ddpm_ism_s_w_scale/images/mlp_anulus_ddpm_ism_s_w_scale_sample.png

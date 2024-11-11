@@ -38,7 +38,7 @@ class MLP(nn.Module):
 
         concat_size = len(self.time_mlp.layer) + len(self.input_mlp1.layer) + len(self.input_mlp2.layer)
         layers = [nn.Linear(concat_size, hidden_size), nn.GELU()]
-        self.fn = nn.LeakyReLU(negative_slope=0.1)
+        self.fn = nn.LeakyReLU(negative_slope=0.01)
 
         for _ in range(hidden_layers):
             layers.append(MLPBlock(hidden_size))

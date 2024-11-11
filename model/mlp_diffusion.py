@@ -25,6 +25,7 @@ class NoiseScheduler():
         self.diff_type = diff_type
         self.pred_type = pred_type
         self.num_timesteps = num_timesteps
+        self.step_size = step_size
 
         # Diffusion schedule 
         if beta_schedule == "linear":
@@ -169,7 +170,7 @@ class NoiseScheduler():
         if isinstance(t, th.Tensor) and t.ndim > 0:
             t = t[0] 
 
-        noise = th.randn_like(x_start)
+        noise = th.zeros_like(x_start)
         x_noisy = x_start
         previous_noise = noise.clone()
         previous_x_noisy = x_noisy.clone()
@@ -267,7 +268,7 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = (sample + (self.eta_z[t])*model_output) # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
+                pred_prev_sample = (sample + self.step_size*model_output) # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
@@ -277,7 +278,7 @@ class NoiseScheduler():
             if t > 0:
                 noisy, noise = self._forward_reflected_noise(pred_prev_sample, 1)
                 # noise = th.randn_like(pred_prev_sample)
-            pred_prev_sample = pred_prev_sample # TODO: verify this noise needs to be scaled or not
+            pred_prev_sample = pred_prev_sample + self.eta_z[t]*noise
 
         return pred_prev_sample
 

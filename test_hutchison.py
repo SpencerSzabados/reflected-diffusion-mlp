@@ -116,25 +116,58 @@ def main():
 
     # Compute estimated divergence
     # estimated_div = hutchinson_divergence_sum(test_function, grid_points, num_samples=20).detach().numpy()
-    estimated_div = hutchinson_divergence(test_function, grid_points, num_samples=30, type="Rademacher").detach().numpy()
+    estimated_div_rademacher = hutchinson_divergence(test_function, grid_points, num_samples=30, type="Rademacher").detach().numpy()
+    estimated_div_guassian = hutchinson_divergence(test_function, grid_points, num_samples=30, type="Guassian").detach().numpy()
+
 
     # Compute absolute error
-    error = np.abs(estimated_div - analytical_div)
+    error_rademacher = np.abs(estimated_div_rademacher - analytical_div)
+    error_guassian = np.abs(estimated_div_guassian - analytical_div)
 
     # Reshape the results for plotting
-    error_grid = error.reshape(X.shape)
+    error_grid_rademacher = error_rademacher.reshape(X.shape)
+    error_grid_guassian = error_guassian.reshape(X.shape)
     analytical_div_grid = analytical_div.reshape(X.shape)
-    estimated_div_grid = estimated_div.reshape(X.shape)
+    # estimated_div_grid = estimated_div.reshape(X.shape)
 
-    # Plot the error as a heatmap
-    plt.figure(figsize=(8, 6))
-    plt.contourf(X, Y, error_grid, levels=50, cmap=plt.cm.YlGnBu_r)
+    # Plot functions
+    # Plot the checkerboard density surface in 3D
+    plt.figure(figsize=(8, 6), dpi=250)
+    plt.contourf(X, Y, analytical_div_grid, levels=50, cmap=plt.cm.YlGnBu_r)
     plt.colorbar(label='Absolute Error')
-    plt.title('Error between Analytical and Estimated Divergence')
+    # plt.title('Error between Analytical and Estimated Divergence')
     plt.xlabel('x')
     plt.ylabel('y')
-    plt.savefig(f"tmp/test_hutchison.png", transparent=True)
+    plt.savefig(f"tmp/analytical_div.png", transparent=True)
     plt.close()
+
+    plt.figure(figsize=(8, 6), dpi=250)
+    plt.contourf(X, Y, error_grid_rademacher, levels=50, cmap=plt.cm.YlGnBu_r)
+    plt.colorbar(label='Absolute Error')
+    # plt.title('Error between Analytical and Estimated Divergence')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.savefig(f"tmp/error_div_hutchison_rademacher.png", transparent=True)
+    plt.close()
+
+    plt.figure(figsize=(8, 6), dpi=250)
+    plt.contourf(X, Y, error_grid_guassian, levels=50, cmap=plt.cm.YlGnBu_r)
+    plt.colorbar(label='Absolute Error')
+    # plt.title('Error between Analytical and Estimated Divergence')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.savefig(f"tmp/error_div_hutchison_guassian.png", transparent=True)
+    plt.close()
+
+    # Plot the error as a heatmap
+    # plt.figure(figsize=(8, 6))
+    # plt.contourf(X, Y, error_grid, levels=50, cmap=plt.cm.YlGnBu_r)
+    # plt.colorbar(label='Absolute Error')
+    # plt.title('Error between Analytical and Estimated Divergence')
+    # plt.xlabel('x')
+    # plt.ylabel('y')
+    # plt.savefig(f"tmp/test_hutchison.png", transparent=True)
+    # plt.close()
 
 
 if __name__=="__main__":

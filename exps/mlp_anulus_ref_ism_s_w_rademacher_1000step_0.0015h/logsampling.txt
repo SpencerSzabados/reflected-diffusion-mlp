@@ -1,0 +1,19 @@
+Logging to /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ref_ism_s_w_rademacher_1000step_0.0015h
+[2024-11-11 13:35:44]====================
+Job started.
+Experiment: mlp_anulus_ref_ism_s_w_rademacher_1000step_0.0015h
+diff_type: ref
+pred_type: s
+loss: ism
+Number of timesteps: 1000
+
+Setting and loading constants...
+Creating data loader...
+Creating model and noise scheduler...
+Found checkpoint: /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ref_ism_s_w_rademacher_1000step_0.0015h/checkpoint_100000.pth
+Loading model state...
+[2024-11-11 13:35:44]====================
+Sampling from model...
+
+Saving plot...
+Saved plot to /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ref_ism_s_w_rademacher_1000step_0.0015h/images/mlp_anulus_ref_ism_s_w_rademacher_1000step_0.0015h_sample.png

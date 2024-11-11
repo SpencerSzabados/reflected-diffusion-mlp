@@ -4,7 +4,7 @@
     transports points from p_T to p_0.
 
     Example launch command:
-    
+    CUDA_VISIBLE_DEVICES=2 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python visulize_score_field.py --exps visulize_score_ddpm_ism --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --g_equiv False --diff_type ddpm --pred_type s --loss ism --num_timesteps 50 --resume_checkpoint /home/sszabados/models/reflected-diffusion-mlp/exps/mlp_anulus_ddpm_ism_s_w_scale/checkpoint_500000.pth
 """
 
 import os
@@ -81,8 +81,8 @@ def create_argparser():
         weight_decay=0.0,
         ema=0.994,
         lr_anneal_steps=0,
-        global_batch_size=10000,
-        global_sample_size=100000,
+        global_batch_size=1000,
+        global_sample_size=1000,
         batch_size=-1,
         log_interval=2000,
         sample_interval=20000,
@@ -176,25 +176,57 @@ def main():
         if args.diff_type == "ddpm":
             sample = th.randn(sample_size, 2)
             timesteps = list(range(len(noise_scheduler)))[::-1]
+
             for i, t in enumerate(tqdm(timesteps)):
                 sample = sample.to(distribute_util.dev())
                 t = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
+
                 score = model(sample, t).to(distribute_util.dev())
                 sample = noise_scheduler.step(score, t[0], sample)
                 
                 # Plot the score field every 20th step.
-                if i%20 == 0:
-                    # Create the plot
-                    sample_cpu = sample.detach().cpu().numpy()
-                    score_cpu = score.detach().cpu().numpy()
-                    plt.figure(figsize=(8, 8))
-                    plt.quiver(
-                        sample_cpu[:, 0], sample_cpu[:, 1], # Positions
-                        score_cpu[:, 0], score_cpu[:, 1],   # Score vectors
-                        angles='xy', scale_units='xy', scale=1, color='blue', alpha=0.6
+                if i%10 == 0 or i == args.num_timesteps-1:
+                    ## Create quiver plot of score vectors
+                    # sample_cpu = sample.detach().cpu().numpy()
+                    # score_cpu = 0.1*score.detach().cpu().numpy()
+                    # plt.figure(figsize=(8, 8))
+                    # plt.quiver(
+                    #     sample_cpu[:, 0], sample_cpu[:, 1], # Positions
+                    #     score_cpu[:, 0], score_cpu[:, 1],   # Score vectors
+                    #     angles='xy', scale_units='xy', scale=1, color='blue', alpha=0.6
+                    # )
+                    # plt.axis('equal')
+                    # plt.grid(True)
+
+                    ## Create flow plot of score vectors
+                    # Define a grid over the plot area
+                    x_min, x_max = -1.5, 1.5
+                    y_min, y_max = -1.5, 1.5
+                    xx, yy = np.meshgrid(
+                        np.linspace(x_min, x_max, 200),
+                        np.linspace(y_min, y_max, 200)
                     )
+
+                    # Flatten grid for model input
+                    grid_points = np.vstack([xx.ravel(), yy.ravel()]).T
+                    grid_points_tensor = th.tensor(grid_points, dtype=th.float32).to(distribute_util.dev())
+
+                    # Repeat t_T for grid points
+                    t_grid = th.full((grid_points_tensor.shape[0],), t[0]).to(distribute_util.dev())
+
+                    # Compute scores at grid points
+                    scores_grid = model(grid_points_tensor, t_grid).cpu().numpy()
+
+                    # Reshape scores for plotting
+                    u = scores_grid[:, 0].reshape(xx.shape)
+                    v = scores_grid[:, 1].reshape(yy.shape)
+
+                    # Plot streamlines
+                    plt.figure(figsize=(8, 8))
+                    plt.streamplot(xx, yy, u, v, density=2.0, color='darkblue', linewidth=1)
                     plt.axis('equal')
                     plt.grid(True)
+                    
                     plt.savefig(f"{outdir}/images/{args.exps}_score_sample_{i}.png", transparent=True)
                     plt.close()
                     logger.log(f"Saved plot to {outdir}/images/{args.exps}_score_sample_{i}.png")
