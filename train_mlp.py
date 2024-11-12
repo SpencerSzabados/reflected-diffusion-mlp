@@ -346,7 +346,7 @@ def main():
             if global_step % args.log_interval == 0 and global_step > 0:
                 time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 logger.log(f"[{time}]"+"-"*20)
-                logger.log(f"Time: {t.numpy()[0]}")
+                logger.log(f"Time: {t.cpu().numpy()[0]}")
                 logger.log(f"Step: {global_step}")
                 logger.log(f"Loss: {loss.detach().item()}")
 
