@@ -72,7 +72,7 @@ def create_argparser():
         eps=1e-5,
         num_steps=1000,  
         sigma_min=0.001,
-        sigma_max=0.6,
+        sigma_max=2.0,
         lr=1e-4,
         weight_decay=0.0,
         weight_lambda=False,
@@ -115,7 +115,7 @@ def update_ema(model, ema_model, ema):
             ema_param.data.mul_(ema).add_(model_param.data, alpha=(1 - ema))
 
 
-def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_samples=50, type="Guassian"):
+def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=50, type="Guassian"):
     """
     Estimates the divergence term using Hutchinson's estimator.
     
@@ -128,7 +128,7 @@ def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_sa
     Returns:
         divergence_term: The estimated divergence term.
     """
-    noisy.requires_grad_(True)
+    sigma = noise_scheduler.sigma(t)
     divergence = th.zeros(noisy.shape[0]).to(device=noisy.device)
 
     for _ in range(num_samples):
@@ -140,7 +140,7 @@ def hutchinson_divergence(args, model, noisy, timesteps, noise_scheduler, num_sa
         else:
             raise NotImplementedError(f"Only Guassian and Rademacher Type distributions are currently supported.")
 
-        pred_score = model(noisy, timesteps)
+        pred_score = model(noisy, sigma)
 
         sum_score = th.sum(pred_score*z)
         # Compute the gradient of the predicted score w.r.t. the noisy input
@@ -177,32 +177,34 @@ def get_loss_fn(args):
             def loss_fn(noisy, model, noise_scheduler, t, loss_w=1.0, score_w=1.0):
                 # Ensure noisy requires gradient for autograd to compute the divergence
                 noisy.requires_grad_(True)
+                sigma = noise_scheduler.sigma(t)
                 loss = 0
                 for k in range(5):
                     noisy_rot = rot_fn(noisy, 2*th.pi/5.0, k)
-                    pred_score = inv_rot_fn(model(noisy_rot, t), 2*th.pi/5.0, k)
+                    pred_score = inv_rot_fn(model(noisy_rot, sigma), 2*th.pi/5.0, k)
                     # 1/2 ||s_theta(x)||_2^2 (regularization term)
                     norm_term = th.sum(score_w*pred_score**2, dim=1).mean()
                     # div(s_theta(x)) (Hutchinson divergence estimator)
                     divergence_term = score_w*hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
-                    noisy.requires_grad_(False)
                     # Total ISM loss
                     loss += norm_term + 2.0*divergence_term
                 loss = loss_w*loss/5.0
+                noisy.requires_grad_(False)
                 return loss
             return loss_fn
         elif not args.g_equiv:
             def loss_fn(noisy, model, noise_scheduler, t, loss_w=1.0, score_w=1.0):
                 # Ensure noisy requires gradient for autograd to compute the divergence
                 noisy.requires_grad_(True)
-                pred_score = model(noisy, t)
+                sigma = noise_scheduler.sigma(t)
+                pred_score = model(noisy, sigma)
                 # 1/2 ||s_theta(x)||_2^2 (regularization term)
                 norm_term = th.sum(score_w*(pred_score**2), dim=1).mean()
                 # div(s_theta(x)) (Hutchinson divergence estimator)
                 divergence_term = score_w*hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
-                noisy.requires_grad_(False)
                 # Total ISM loss
                 loss = loss_w*(norm_term + 2.0*divergence_term) 
+                noisy.requires_grad_(False)
                 return loss 
             return loss_fn
         else:
@@ -316,7 +318,7 @@ def main():
                     # 1/2 ||s_theta(x)||_2^2 (regularization term)
                     norm = th.sum(pred_score**2, dim=1).mean()
                     # div(s_theta(x)) (Hutchinson divergence estimator)
-                    div = hutchinson_divergence(args, model, noisy, sigma, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
+                    div = hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
                     # estimate score of score
                     score_w = -2*div/norm
 
@@ -328,7 +330,7 @@ def main():
             # Compute loss
             optimizer.zero_grad()
             # Compute the loss using the selected loss function
-            loss = loss_fn(noisy, model, noise_scheduler, sigma, loss_w=loss_w, score_w=score_w)
+            loss = loss_fn(noisy, model, noise_scheduler, t, loss_w=loss_w, score_w=score_w)
             # Update gradients
             loss.backward()
             optimizer.step()
@@ -343,7 +345,7 @@ def main():
             if global_step % args.log_interval == 0 and global_step > 0:
                 time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 logger.log(f"[{time}]"+"-"*20)
-                logger.log(f"Time: {timesteps[0]}")
+                logger.log(f"Time: {t.numpy()[0]}")
                 logger.log(f"Step: {global_step}")
                 logger.log(f"Loss: {loss.detach().item()}")
 
