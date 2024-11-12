@@ -17,7 +17,8 @@ class NoiseScheduler():
                  eps=1e-5,
                  sigma_min=0.001,
                  sigma_max=0.6,
-                 num_steps=1000):
+                 num_steps=1000
+                ):
 
         self.eps = eps
         self.sigma_min = sigma_min

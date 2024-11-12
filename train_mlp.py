@@ -115,7 +115,7 @@ def update_ema(model, ema_model, ema):
             ema_param.data.mul_(ema).add_(model_param.data, alpha=(1 - ema))
 
 
-def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=50, type="Guassian"):
+def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=30, type="Guassian"):
     """
     Estimates the divergence term using Hutchinson's estimator.
     
@@ -128,7 +128,7 @@ def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=50
     Returns:
         divergence_term: The estimated divergence term.
     """
-    sigma = noise_scheduler.sigma(t)
+    sigma = noise_scheduler.sigma(t).to(device=noisy.device)
     divergence = th.zeros(noisy.shape[0]).to(device=noisy.device)
 
     for _ in range(num_samples):
@@ -177,7 +177,7 @@ def get_loss_fn(args):
             def loss_fn(noisy, model, noise_scheduler, t, loss_w=1.0, score_w=1.0):
                 # Ensure noisy requires gradient for autograd to compute the divergence
                 noisy.requires_grad_(True)
-                sigma = noise_scheduler.sigma(t)
+                sigma = noise_scheduler.sigma(t).to(device=noisy.device)
                 loss = 0
                 for k in range(5):
                     noisy_rot = rot_fn(noisy, 2*th.pi/5.0, k)
@@ -196,7 +196,7 @@ def get_loss_fn(args):
             def loss_fn(noisy, model, noise_scheduler, t, loss_w=1.0, score_w=1.0):
                 # Ensure noisy requires gradient for autograd to compute the divergence
                 noisy.requires_grad_(True)
-                sigma = noise_scheduler.sigma(t)
+                sigma = noise_scheduler.sigma(t).to(device=noisy.device)
                 pred_score = model(noisy, sigma)
                 # 1/2 ||s_theta(x)||_2^2 (regularization term)
                 norm_term = th.sum(score_w*(pred_score**2), dim=1).mean()
@@ -303,6 +303,7 @@ def main():
             noisy = noise_scheduler.add_noise(batch, t)
 
             # put data on gpu
+            t = t.to(distribute_util.dev())
             sigma = sigma.to(distribute_util.dev())
             batch = batch.to(distribute_util.dev())
             noisy = noisy.to(distribute_util.dev())
