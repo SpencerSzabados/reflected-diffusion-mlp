@@ -21,7 +21,7 @@ import torch as th
 
 from model.utils.point_dataset_loader import load_data
 from model.utils.checkpoint_util import load_and_sync_parameters, save_checkpoint
-from model.mlp_diffusion import NoiseScheduler
+from model.cmlp_diffusion import NoiseScheduler
 
 from tqdm import tqdm
 from model.utils import logger

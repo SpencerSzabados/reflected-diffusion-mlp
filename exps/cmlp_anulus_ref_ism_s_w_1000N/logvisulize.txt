@@ -1,0 +1,49 @@
+Logging to /home/sszabados/models/reflected-diffusion-mlp/exps/cmlp_anulus_ref_ism_s_w_1000N
+[2024-11-19 14:03:24]====================
+Job started.
+Experiment: cmlp_anulus_ref_ism_s_w_1000N
+
+exps: cmlp_anulus_ref_ism_s_w_1000N
+working_dir: /home/sszabados/models/reflected-diffusion-mlp
+data_dir: /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz
+g_equiv: False
+g_input: None
+eqv_reg: False
+loss: ism
+hidden_layers: 3
+hidden_size: 256
+emb_size: 128
+div_num_samples: 50
+div_distribution: Rademacher
+eps: 1e-05
+num_steps: 1000
+sigma_min: 0.001
+sigma_max: 5.0
+lr: 0.0001
+weight_decay: 0.0
+weight_lambda: False
+ema: 0.994
+ema_interval: 1000
+lr_anneal_steps: 0
+scale_output: False
+score_scale: False
+score_scale_interval: 1000
+global_batch_size: 10000
+global_sample_size: 100000
+batch_size: -1
+log_interval: 2000
+sample_interval: 20000
+save_interval: 100000
+training_steps: 1000000
+resume_training: True
+resume_checkpoint: /home/sszabados/models/reflected-diffusion-mlp/exps/cmlp_anulus_ref_ism_s_w_1000N/checkpoint_200000.pth
+user_id: dummy
+slurm_id: -1
+Setting and loading constants...
+Creating data loader...
+Creating model and noise scheduler...
+Found checkpoint: /home/sszabados/models/reflected-diffusion-mlp/exps/cmlp_anulus_ref_ism_s_w_1000N/checkpoint_200000.pth
+Loading model state...
+[2024-11-19 14:03:24]====================
+Sampling from model...
+

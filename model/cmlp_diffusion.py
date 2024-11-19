@@ -4,6 +4,7 @@
     Implementation based on (https://github.com/tanelp/tiny-diffusion/blob/master/ddpm.py)
 """
 
+import numpy as np
 import torch as th
 import torch.nn.functional as F
 
@@ -16,7 +17,7 @@ class NoiseScheduler():
     def __init__(self,
                  eps=1e-5,
                  sigma_min=0.001,
-                 sigma_max=0.6,
+                 sigma_max=5.0,
                  num_steps=1000
                 ):
 
@@ -29,8 +30,7 @@ class NoiseScheduler():
         # Diffusion schedule 
     
     def sigma(self, t):
-        t = th.rand((1,))*(1 - self.eps) + self.eps
-        sigma = self.sigma_min*(self.sigma_max/self.sigma_min)**t
+        sigma = th.tensor(self.sigma_min*(self.sigma_max/self.sigma_min)**t)
 
         return sigma
 
@@ -55,7 +55,7 @@ class NoiseScheduler():
         distances = th.linalg.norm(x_t, ord=2, dim=1)
         
         # Determine if distances are within [r_in, r_out]
-        free_idx = (distances >= r_in-margin) & (distances <= r_out+margin)
+        free_idx = (distances >= r_in+margin) & (distances <= r_out-margin)
         coll_idx = ~free_idx
 
         return coll_idx, free_idx
@@ -95,6 +95,13 @@ class NoiseScheduler():
 
         return x_noisy, noise
     
+    def get_drift(self, model, x, sigma):
+        diffusion = sigma * th.sqrt(th.tensor(2 * (np.log(self.sigma_max) - np.log(self.sigma_min)), device=x.device))
+
+        score =  model(x, sigma)
+
+        return -diffusion**2 * score/2.0
+
     def step(self, model_output, t, sample):
         assert(model_output.device == sample.device)
 

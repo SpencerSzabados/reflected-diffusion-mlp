@@ -2,7 +2,7 @@
     Script for training a mlp diffusion model on point data.
 
     Example launch command:
-    CUDA_VISIBLE_DEVICES=2 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python train_mlp.py --exps mlp_anulus_cont_ref_ism_s_-data_dir /home/sszabados/daw_1000N --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --g_equiv False --weight_lambda True
+    CUDA_VISIBLE_DEVICES=1 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python train_cmlp.py --exps cmlp_anulus_ref_ism_s_w_1000N --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --g_equiv False --weight_lambda True 
 """
 
 import os
@@ -20,8 +20,8 @@ import blobfile as bf
 
 from model.utils.point_dataset_loader import load_data
 from model.utils.checkpoint_util import load_and_sync_parameters, save_checkpoint
-from model.mlp import MLP
-from model.mlp_diffusion import NoiseScheduler
+from model.cmlp import CMLP
+from model.cmlp_diffusion import NoiseScheduler
 from model.model_modules.mlp_layers import rot_fn, inv_rot_fn
 
 from tqdm import tqdm
@@ -63,22 +63,21 @@ def create_argparser():
         eqv_reg=False,     # False, True 
         loss="ism",        # ism
         hidden_layers=3,
-        hidden_size=128,
+        hidden_size=256,
         emb_size=128,
-        time_emb="sinusoidal",
-        input_emb="sinusoidal",
         div_num_samples=50,            # Number of samples used to estimate ism divergence term
         div_distribution="Rademacher", # Guassian, Rademacher
         eps=1e-5,
         num_steps=1000,  
         sigma_min=0.001,
-        sigma_max=2.0,
+        sigma_max=5.0,
         lr=1e-4,
         weight_decay=0.0,
         weight_lambda=False,
         ema=0.994,
         ema_interval=1,
         lr_anneal_steps=0,
+        scale_output=False,
         score_scale=False,
         score_scale_interval=1000,
         global_batch_size=10000,
@@ -262,12 +261,11 @@ def main():
     train_loader, test_loader = load_data(data_dir=args.data_dir, train_batch_size=batch_size, test_batch_size=sample_size)
 
     logger.log("Creating model and noise scheduler...")  
-    model = MLP(hidden_layers=args.hidden_layers, 
+
+    model = CMLP(hidden_layers=args.hidden_layers, 
                 hidden_size=args.hidden_size,
                 emb_size=args.emb_size,
-                time_emb=args.time_emb,
-                input_emb=args.input_emb)
-
+                scale_output=args.scale_output)
     
     noise_scheduler = NoiseScheduler(eps=args.eps,
                                      sigma_min=args.sigma_min,
@@ -298,7 +296,7 @@ def main():
         model.train()
         for step, batch in enumerate(train_loader):
             batch = batch[0]
-            t = th.rand((1,)) 
+            t = th.rand((1,))*(1 - args.eps) + args.eps
             sigma = noise_scheduler.sigma(t)
             noisy = noise_scheduler.add_noise(batch, t)
 
@@ -354,7 +352,6 @@ def main():
             if global_step % args.sample_interval == 0 and global_step > 0:
                 logger.log("Logging (saving) sample plot...")
                 # Generate data with the model to later visualize the learning process.
-                # Sampling process changes based on the chosen parameterization.
                 model.eval()
                 with th.no_grad():
                     sample_batch = next(iter(test_loader))[0]
@@ -362,10 +359,10 @@ def main():
                     timesteps = th.linspace(1.0, args.eps, args.num_steps+1)[:-1]
                     for i, t in enumerate(tqdm(timesteps)):
                         sample = sample.to(distribute_util.dev())
-                        sigma = noise_scheduler.sigma(t)*th.ones_like(sample.shape[0]).to(distribute_util.dev())
+                        sigma = noise_scheduler.sigma(t).to(distribute_util.dev())
                         score = model(sample, sigma).to(distribute_util.dev())
                         sample = noise_scheduler.step(score, t, sample)
-                   
+                    
                     frame = sample.detach().cpu().numpy()
 
                     logger.log("Saving plot...")

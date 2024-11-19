@@ -120,6 +120,17 @@ class ZeroEmbedding(nn.Module):
         return 1
 
 
+class EmptyEmbedding(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, x):
+        pass 
+    
+    def __len__(self):
+        return 0
+
+
 class PositionalEmbedding(nn.Module):
     def __init__(self, size: int, type: str, **kwargs):
         super().__init__()
@@ -134,6 +145,8 @@ class PositionalEmbedding(nn.Module):
             self.layer = ZeroEmbedding()
         elif type == "identity":
             self.layer = IdentityEmbedding()
+        elif type == "empty":
+            self.layer = EmptyEmbedding()
         else:
             raise ValueError(f"Unknown positional embedding type: {type}")
 
