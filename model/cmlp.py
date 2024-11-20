@@ -14,7 +14,7 @@ class SinActivation(nn.Module):
 
 def get_timestep_embedding(timesteps, embedding_dim, dtype=th.float32):
     assert len(timesteps.shape) == 1
-    timesteps *= 1000.
+    timesteps *= 1000.0
 
     half_dim = embedding_dim // 2
     emb = np.log(10000) / (half_dim - 1)
@@ -49,9 +49,9 @@ def create_network(in_dim, hidden_dim, out_dim, n_hidden, act):
 class CMLP(nn.Module):
     def __init__(
             self, 
-            hidden_size: int = 128, 
+            hidden_size: int = 256, 
             emb_size: int = 128,
-            hidden_layers: int = 3, 
+            hidden_layers: int = 5, 
             boundary_tol: float = 0.005,
             scale_output: bool = False,
         ):
@@ -93,24 +93,30 @@ class CMLP(nn.Module):
         return min_distance
 
     def forward(self, x, sigma):
+        # Ensure sigma is a tensor with shape [B, 1]
+        batch_size = x.shape[0]
+        sigma = sigma.view(1, 1).expand(batch_size, 1)
 
-        t_p = sigma * th.ones((x.shape[0],)).to(x.device)
-        t_p = t_p[:,None]
+        # Optionally include sigma directly
+        inp = [x, sigma]
 
-        inp = (x, t_p)
-
+        # Generate time embeddings (all identical in the batch)
         if self.emb_size > 0:
-            t_harmonics = get_timestep_embedding(sigma * th.ones((x.shape[0],)).to(x.device), self.emb_size)
-            inp = inp + (t_harmonics,)
+            sigma_flat = sigma.view(batch_size).clone()  # Shape [B]
+            t_harmonics = get_timestep_embedding(sigma_flat, self.emb_size)
+            inp.append(t_harmonics)
 
-        input = th.cat(inp, dim=-1)
+        # Concatenate inputs
+        input = th.cat(inp, dim=-1)  # Shape [B, input_dim]
+
+        # Pass through the network
         pred_score = self.func(input)
 
         boundary_dist = self._compute_boundary_distance(x)
         pred_score = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)).reshape(-1, 1)*pred_score
 
         if self.scale_output:
-            return pred_score / t_p
-        else:
-            return pred_score
+            pred_score = pred_score / sigma
+        
+        return pred_score
 

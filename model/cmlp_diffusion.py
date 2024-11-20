@@ -30,7 +30,7 @@ class NoiseScheduler():
         # Diffusion schedule 
     
     def sigma(self, t):
-        sigma = th.tensor(self.sigma_min*(self.sigma_max/self.sigma_min)**t)
+        sigma = th.tensor(self.sigma_min**(1-t)*self.sigma_max**t).clone().detach()
 
         return sigma
 
