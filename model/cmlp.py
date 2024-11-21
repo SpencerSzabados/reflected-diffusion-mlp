@@ -34,6 +34,8 @@ def create_network(in_dim, hidden_dim, out_dim, n_hidden, act):
         act = nn.SiLU
     elif act.lower() == "relu":
         act = nn.ReLU
+    elif act.lower() == "gelu":
+        act = nn.GELU
     else:
         raise NotImplementedError
 
@@ -62,7 +64,7 @@ class CMLP(nn.Module):
         self.emb_size = emb_size
         self.boundary_tol = boundary_tol
         self.scale_output = scale_output
-        self.func = create_network(2 + 1 + emb_size, hidden_size, 2, hidden_layers, "relu")
+        self.func = create_network(2 + 1 + emb_size, hidden_size, 2, hidden_layers, "gelu")
         self.fn = nn.ReLU()
 
     def _compute_boundary_distance(self, x):
@@ -97,20 +99,15 @@ class CMLP(nn.Module):
         batch_size = x.shape[0]
         sigma = sigma.view(1, 1).expand(batch_size, 1)
 
-        # Optionally include sigma directly
-        inp = [x, sigma]
-
-        # Generate time embeddings (all identical in the batch)
-        if self.emb_size > 0:
-            sigma_flat = sigma.view(batch_size).clone()  # Shape [B]
-            t_harmonics = get_timestep_embedding(sigma_flat, self.emb_size)
-            inp.append(t_harmonics)
+        sigma_flat = sigma.view(batch_size).clone()  # Shape [B]
+        sigma_emb = get_timestep_embedding(sigma_flat, self.emb_size)
+        inp = [x, sigma_emb]
 
         # Concatenate inputs
-        input = th.cat(inp, dim=-1)  # Shape [B, input_dim]
+        inp = th.cat(inp, dim=-1)  # Shape [B, input_dim]
 
         # Pass through the network
-        pred_score = self.func(input)
+        pred_score = self.func(inp)
 
         boundary_dist = self._compute_boundary_distance(x)
         pred_score = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)).reshape(-1, 1)*pred_score
