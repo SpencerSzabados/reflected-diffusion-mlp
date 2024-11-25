@@ -51,7 +51,6 @@ def inv_rot_fn(points, angle, k):
     return rot_fn(points, angle, -k)
     
 
-
 class SinusoidalEmbedding(nn.Module):
     def __init__(self, size: int, scale: float = 1.0):
         super().__init__()

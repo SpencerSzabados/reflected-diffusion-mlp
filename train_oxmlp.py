@@ -1,8 +1,8 @@
 """
-    Script for training a mlp diffusion model on point data.
+Script for training a mlp diffusion model on point data.
 
     Example launch command:
-    CUDA_VISIBLE_DEVICES=1 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python train_cmlp.py --exps cmlp_anulus_ref_ism_s_w_1000N --data_dir /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_dataset.npz --g_equiv False --weight_lambda True 
+    CUDA_VISIBLE_DEVICES=2 NCCL_P2P_LEVEL=NVL mpiexec -n 1 python train_oxmlp.py --exps oxmlp_radial_cdif_ism_w_1000N_t --data_dir /home/sszabados/datasets/checkerboard/radial_checkerboard_density_dataset.npz --g_equiv False --weight_lambda True 
 """
 
 import os
@@ -10,20 +10,17 @@ import argparse
 from model.utils import distribute_util
 import torch.distributed as dist
 
-import matplotlib.pyplot as plt
+from model.utils.point_dataset_loader import load_data
+
 import numpy as np
 import torch as th
-import torch.nn as nn
-import torch.nn.functional as F
 from copy import deepcopy
-import blobfile as bf
+import torch.optim as optim
+from model.oxmlp import CEmbedMLP, CMLP
+from model.oxmlp_diffusion import SDE, Sigma
+from model.manifolds.euclidean import Euclidean
 
-from model.utils.point_dataset_loader import load_data
-from model.utils.checkpoint_util import load_and_sync_parameters, save_checkpoint
-from model.cmlp import CMLP
-from model.cmlp_diffusion import NoiseScheduler
-from model.model_modules.mlp_layers import rot_fn, inv_rot_fn
-
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 from model.utils import logger
 from datetime import datetime
@@ -60,11 +57,13 @@ def create_argparser():
         data_dir="",
         g_equiv=False,     # False, True
         g_input=None,      # None, C5
-        eqv_reg=False,     # False, True 
         loss="ism",        # ism
-        hidden_layers=3,
-        hidden_size=256,
-        emb_size=128,
+        input_dim=2,
+        embedding_dim=128,
+        hidden_dims=[512, 512, 512],
+        output_dim=2,
+        activation='gelu',
+        manifold='disc',
         div_num_samples=50,            # Number of samples used to estimate ism divergence term
         div_distribution="Rademacher", # Guassian, Rademacher
         eps=1e-5,
@@ -78,8 +77,6 @@ def create_argparser():
         ema_interval=1,
         lr_anneal_steps=0,
         scale_output=False,
-        score_scale=False,
-        score_scale_interval=1000,
         global_batch_size=10000,
         global_sample_size=100000,
         batch_size=-1,
@@ -87,8 +84,6 @@ def create_argparser():
         sample_interval=20000,
         save_interval=100000,
         training_steps=1000000,
-        resume_training=True,
-        resume_checkpoint="",
         user_id='dummy',
         slurm_id='-1',
     )
@@ -114,7 +109,46 @@ def update_ema(model, ema_model, ema):
             ema_param.data.mul_(ema).add_(model_param.data, alpha=(1 - ema))
 
 
-def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=30, type="Guassian"):
+def _ism_loss_fn(model, sde, batch, weight_lambda=True, hutchinson_type="Rademacher", eps=1e-3):
+    batch_size = batch.shape[0]
+    device = batch.device
+
+    # Sample t uniformly between sde.t0 + eps and sde.tf
+    t = th.rand(batch_size, device=device) * (sde.tf - sde.t0 - eps) + sde.t0 + eps  # [batch_size]
+
+    # Sample x_t from marginal distribution
+    x_t = sde.marginal_sample(batch, t)
+
+    # Compute score
+    x_t.requires_grad_(True)
+    score_fn = sde.reparametrize_score_fn(model)
+    score = score_fn(x_t, t) 
+
+    if hutchinson_type == "Rademacher":
+        z = th.randint(0, 2, x_t.shape, device=device).float() * 2 - 1
+    else:  
+        z = th.randn_like(x_t)
+
+    # Compute divergence estimate
+    y = (score * z).sum()
+    grad_y = th.autograd.grad(outputs=y, inputs=x_t, create_graph=True)[0]  
+    divergence_estimate = (grad_y * z).sum(dim=1)  
+
+    # Compute ||score||^2
+    norm_score = (score**2).sum(dim=1)  
+
+    # Compute losses
+    loss = norm_score + 2.0*divergence_estimate 
+
+    if weight_lambda:
+        loss = (sde.diffusion(t)**2)*loss 
+
+    loss = loss.mean()
+
+    return loss
+
+
+def hutchinson_divergence(score_fn, sde, noisy, t, num_samples=30, type="Guassian"):
     """
     Estimates the divergence term using Hutchinson's estimator.
     
@@ -127,8 +161,6 @@ def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=30
     Returns:
         divergence_term: The estimated divergence term.
     """
-    noisy.requires_grad_(True)
-    sigma = noise_scheduler.sigma(t).to(device=noisy.device)
     divergence = th.zeros(noisy.shape[0]).to(device=noisy.device)
 
     for _ in range(num_samples):
@@ -140,8 +172,7 @@ def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=30
         else:
             raise NotImplementedError(f"Only Guassian and Rademacher Type distributions are currently supported.")
 
-        pred_score = model(noisy, sigma)
-
+        pred_score = score_fn(noisy, t)
         sum_score = th.sum(pred_score*z)
         # Compute the gradient of the predicted score w.r.t. the noisy input
         grad_pred_score = th.autograd.grad(outputs=sum_score,
@@ -160,55 +191,24 @@ def hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=30
     return divergence_mean
 
 
-# Function to return either mse_loss or the implicit score matching loss
-def get_loss_fn(args):
-    """
-    Retruns an anonymous loss function based on selected args.
+def get_ism_loss_fn(score_fn, sde, weight_lambda=True, eps=1e-4, distribution="Rademacher", num_samples=20):
+    def ism_loss(noisy, t):
+        noisy.requires_grad_(True)
 
-    Params:
-        args (dict): Dictionary list of launch paramters .
-        model (Class): Model to be trained.
-        noise_scheduler (Class): The noise scheduler used to convert predicted noise to score.
-    Returns:
-        loss_fn (Function): Function that computes the forwards loss.
-    """
-    if args.loss == 'ism':
-        if args.g_equiv and args.g_input == "C5":
-            def loss_fn(noisy, model, noise_scheduler, t, loss_w=1.0, score_w=1.0):
-                # Ensure noisy requires gradient for autograd to compute the divergence
-                noisy.requires_grad_(True)
-                sigma = noise_scheduler.sigma(t).to(device=noisy.device)
-                loss = 0
-                for k in range(5):
-                    noisy_rot = rot_fn(noisy, 2*th.pi/5.0, k)
-                    pred_score = inv_rot_fn(model(noisy_rot, sigma), 2*th.pi/5.0, k)
-                    # 1/2 ||s_theta(x)||_2^2 (regularization term)
-                    norm_term = th.sum(score_w*pred_score**2, dim=1).mean()
-                    # div(s_theta(x)) (Hutchinson divergence estimator)
-                    divergence_term = score_w*hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
-                    # Total ISM loss
-                    loss += norm_term + 2.0*divergence_term
-                loss = loss_w*loss/5.0
-                noisy.requires_grad_(False)
-                return loss
-            return loss_fn
-        elif not args.g_equiv:
-            def loss_fn(noisy, model, noise_scheduler, t, loss_w=1.0, score_w=1.0):
-                # Ensure noisy requires gradient for autograd to compute the divergence
-                noisy.requires_grad_(True)
-                sigma = noise_scheduler.sigma(t).to(device=noisy.device)
-                pred_score = model(noisy, sigma)
-                # 1/2 ||s_theta(x)||_2^2 (regularization term)
-                norm_term = th.sum(score_w*(pred_score**2), dim=1).mean()
-                # div(s_theta(x)) (Hutchinson divergence estimator)
-                divergence_term = score_w*hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
-                # Total ISM loss
-                loss = loss_w*(norm_term + 2.0*divergence_term) 
-                noisy.requires_grad_(False)
-                return loss 
-            return loss_fn
+        pred_score = score_fn(noisy, t)
+        # ||s_theta(x)||_2^2 (regularization term)
+        norm_term = th.sum((pred_score**2), dim=1).mean()
+        # div(s_theta(x)) (Hutchinson divergence estimator)
+        divergence_term = hutchinson_divergence(score_fn, sde, noisy, t, num_samples=num_samples, type=distribution)
+        # Total ISM loss
+        if weight_lambda:
+            loss_w = sde.diffusion(t)[0]**2
+            loss = loss_w*(norm_term + 2.0*divergence_term) 
         else:
-            raise NotImplementedError(f"Loss option is not supported.")
+            loss = (norm_term + 2.0*divergence_term) 
+
+        return loss
+    return ism_loss
 
 
 def main():
@@ -247,6 +247,8 @@ def main():
 
     logger.log(f"Setting and loading constants...")
     global_step = 0
+    running_avg_loss = 0.0
+    loss_count = 0
 
     logger.log("Creating data loader...")
     if args.batch_size == -1:
@@ -263,91 +265,86 @@ def main():
 
     logger.log("Creating model and noise scheduler...")  
 
-    model = CMLP(hidden_layers=args.hidden_layers, 
-                hidden_size=args.hidden_size,
-                emb_size=args.emb_size,
-                scale_output=args.scale_output)
+    # Initialize model and manifold
+    # manifold = DiscManifold(radius=1.0)
+    manifold = Euclidean() # TODO: this was removed to test the function of the model for normal diffusion.
     
-    noise_scheduler = NoiseScheduler(eps=args.eps,
-                                     sigma_min=args.sigma_min,
-                                     sigma_max=args.sigma_max,
-                                     num_steps=args.num_steps)
+    # model = CEmbedMLP(
+    #             input_dim=args.input_dim,
+    #             embedding_dim=args.embedding_dim,
+    #             hidden_dims=args.hidden_dims,
+    #             output_dim=args.output_dim,
+    #             activation=args.activation,
+    #             manifold=manifold
+    #         ).to(device=distribute_util.dev())
+    
+    model = CMLP(input_dim=args.input_dim,
+                hidden_dims=args.hidden_dims,
+                output_dim=args.output_dim,
+                activation=args.activation,
+                manifold=manifold
+            ).to(device=distribute_util.dev())
 
-    
+    # Initialize SDE
+    sigma = Sigma(eps=args.eps,
+                  sigma_min=args.sigma_min, 
+                  sigma_max=args.sigma_max, 
+                  T=1.0)
+    sde = SDE(sigma)
+    # Get score function
+    score_fn = sde.reparametrize_score_fn(model)
+    # Get loss function
+    loss_fn = get_ism_loss_fn(
+                score_fn=score_fn,
+                sde=sde,
+                weight_lambda=args.weight_lambda,
+                distribution=args.div_distribution,
+                eps=args.eps,
+            )
+
     logger.log("Creating optimizer...")
-    # Get the loss function (ISM or MSE) based on args.loss
-    loss_w = 1.0
-    score_w = 1.0
-    loss_fn = get_loss_fn(args)
-
     # Set up the optimizer
     optimizer = th.optim.AdamW(model.parameters(), lr=args.lr)
-
     # Create a deepcopy of the model to store the EMA weights
     ema_model = deepcopy(model)
     # Disable gradient tracking for the EMA model
     for param in ema_model.parameters():
         param.requires_grad = False
 
-    global_step, model, ema_model, optimizer = load_and_sync_parameters(args, model, ema_model, optimizer)
-
+    # Training loop
     time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.log(f"[{time}]"+"="*20+"\nTraining model...\n")
     while global_step < args.training_steps:
         model.train()
         for step, batch in enumerate(train_loader):
-            batch = batch[0]
-            t = th.rand((1,))*(1 - args.eps) + args.eps
-            sigma = noise_scheduler.sigma(t)
-            noisy = noise_scheduler.add_noise(batch, t)
-
-            # put data on gpu
-            t = t.to(distribute_util.dev())
-            sigma = sigma.to(distribute_util.dev())
-            batch = batch.to(distribute_util.dev())
-            noisy = noisy.to(distribute_util.dev())
-
-            # Estimate score scale to normalize the scale between norm and div of score estimates.
-            if args.score_scale and \
-               args.pred_type == "ism" and \
-               global_step % args.score_scale_interval == 0:
-                with th.no_grad():
-                    # Ensure noisy requires gradient for autograd to compute the divergence
-                    noisy.requires_grad_(True)
-                    pred_score = model(noisy, sigma)
-                    # 1/2 ||s_theta(x)||_2^2 (regularization term)
-                    norm = th.sum(pred_score**2, dim=1).mean()
-                    # div(s_theta(x)) (Hutchinson divergence estimator)
-                    div = hutchinson_divergence(args, model, noisy, t, noise_scheduler, num_samples=args.div_num_samples, type=args.div_distribution)
-                    # estimate score of score
-                    score_w = -2*div/norm
-
-            # Add loss weighting function loss_w=(t+1)
-            if args.weight_lambda:
-                with th.no_grad():
-                    loss_w = (sigma**2.0).to(distribute_util.dev())
-
-            # Compute loss
+            batch = batch[0].to(distribute_util.dev())
+            # Simulate forwards sde
+            t = sde.rand_t(batch_size, device=distribute_util.dev())
+            noisy = sde.marginal_sample(batch, t)
+        
+            # Compute loss using ISM loss function
             optimizer.zero_grad()
-            # Compute the loss using the selected loss function
-            loss = loss_fn(noisy, model, noise_scheduler, t, loss_w=loss_w, score_w=score_w)
-            # Update gradients
+            loss = loss_fn(noisy, t)
             loss.backward()
             optimizer.step()
-            
+
             if args.ema > 0 and global_step % args.ema_interval == 0:
                 # Update the EMA model after the optimizer step
                 update_ema(model, ema_model, args.ema)
 
             global_step += 1
+            loss_count += 1
+            running_avg_loss += (loss.detach().item() - running_avg_loss) / loss_count
 
             # If logging interval is reached log time, step number, and current batch loss.
             if global_step % args.log_interval == 0 and global_step > 0:
                 time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 logger.log(f"[{time}]"+"-"*20)
-                logger.log(f"Time: {t.cpu().numpy()[0]}")
                 logger.log(f"Step: {global_step}")
-                logger.log(f"Loss: {loss.detach().item()}")
+                logger.log(f"Step loss: {loss.detach().item()}")
+                logger.log(f"Avg loss: {running_avg_loss}")
+                loss_count = 0
+                running_avg_loss = 0.0
 
             # If sampling interval is reached generate and save incremental sample.
             if global_step % args.sample_interval == 0 and global_step > 0:
@@ -355,28 +352,24 @@ def main():
                 # Generate data with the model to later visualize the learning process.
                 model.eval()
                 with th.no_grad():
-                    sample_batch = next(iter(test_loader))[0]
-                    sample, noise = noise_scheduler._forward_reflected_noise(sample_batch, 1.0)
+                    score_fn = sde.reparametrize_score_fn(model)
+                    # sample = manifold.sample(sample_size).to(distribute_util.dev())
+                    sample = sde.prior_sample(sample_size).to(distribute_util.dev())
                     timesteps = th.linspace(1.0, args.eps, args.num_steps+1)[:-1]
                     for i, t in enumerate(tqdm(timesteps)):
-                        sample = sample.to(distribute_util.dev())
-                        sigma = noise_scheduler.sigma(t).to(distribute_util.dev())
-                        score = model(sample, sigma).to(distribute_util.dev())
-                        sample = noise_scheduler.step(score, t, sample)
+                        t = t*th.ones((sample_size,)).to(distribute_util.dev())
+                        score = score_fn(sample, t)
+                        sample = sample + (args.sigma_max-args.sigma_min)/args.num_steps * score
                     
-                    frame = sample.detach().cpu().numpy()
+                        frame = sample.detach().cpu().numpy()
 
-                    logger.log("Saving plot...")
-                    plt.figure(figsize=(8, 8))
-                    plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-                    plt.axis('off')
-                    plt.savefig(f"{outdir}/images/sample_{global_step}.png", transparent=True)
-                    plt.close()
+                        logger.log("Saving plot...")
+                        plt.figure(figsize=(8, 8))
+                        plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+                        plt.axis('off')
+                        plt.savefig(f"{outdir}/images/sample_{global_step}.png", transparent=True)
+                        plt.close()
                 model.train()
-
-            if global_step % args.save_interval == 0 and global_step > 0:
-                save_checkpoint(outdir, model, ema_model, optimizer, global_step)
-                
 
 if __name__ == "__main__":
     main()
