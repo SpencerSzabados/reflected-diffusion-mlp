@@ -20,7 +20,6 @@ import numpy as np
 import torch as th
 
 from model.utils.point_dataset_loader import load_data
-from model.utils.checkpoint_util import load_and_sync_parameters, save_checkpoint
 from model.mlp_diffusion import NoiseScheduler
 
 from tqdm import tqdm
@@ -57,14 +56,13 @@ def create_argparser():
         exps="mlp",
         working_dir="",
         data_dir="",
-        diff_type='pfode', # pfode, ddpm, ref
+        diff_type='ddpm', # ddpm, ref
         pred_type='eps',   # epx, x
         num_timesteps=50,
         step_size=-1.0,
         beta_start=0.0001,
         beta_end=0.02,
         beta_schedule="linear",
-        schedule_sampler="uniform",
         global_batch_size=10000,
         global_sample_size=100000,
         batch_size=-1,
@@ -139,29 +137,20 @@ def main():
     logger.log(f"[{time}]"+"="*20+"\nSampling from model...\n")
 
     with th.no_grad():
-        sample_batch = next(iter(test_loader))[0]
+        sample = next(iter(test_loader))[0]
         timesteps = list(range(len(noise_scheduler)))[::-1]
         
-        # for t in tqdm(range(args.num_timesteps)):
-        t = timesteps[0]
-        noise = th.randn_like(sample_batch)
-        sample = noise_scheduler.add_noise(sample_batch, noise, t)
+        for t in tqdm(range(args.num_timesteps)):
+            noise = th.randn_like(sample)
+            sample = noise_scheduler.add_noise(sample, noise, 1)
 
-            # # Save incremental frames
-            # frame = sample.detach().cpu().numpy()
-            # plt.figure(figsize=(8, 8))
-            # plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-            # plt.axis('off')
-            # plt.savefig(f"{outdir}/images/{args.exps}_debug_ref_xnoisy_sample_{t}.png", transparent=True)
-            # plt.close()
-
-        # Save incremental frames
-        frame = sample.detach().cpu().numpy()
-        plt.figure(figsize=(8, 8))
-        plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-        plt.axis('off')
-        plt.savefig(f"{outdir}/images/{args.exps}_debug_ref_{args.num_timesteps}steps_xnoisy_sample_{t}.png", transparent=True)
-        plt.close()
+            # Save incremental frames
+            frame = sample.detach().cpu().numpy()
+            plt.figure(figsize=(8, 8))
+            plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
+            plt.axis('off')
+            plt.savefig(f"{outdir}/images/{args.exps}_debug_ref_{args.num_timesteps}steps_xnoisy_sample_{t}.png", transparent=True)
+            plt.close()
 
         
 if __name__ == "__main__":

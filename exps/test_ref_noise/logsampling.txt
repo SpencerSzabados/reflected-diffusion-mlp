@@ -1,5 +1,5 @@
 Logging to /home/sszabados/models/reflected-diffusion-mlp/exps/test_ref_noise
-[2024-11-09 16:59:39]====================
+[2024-11-25 19:50:21]====================
 Job started.
 Experiment: test_ref_noise
 
@@ -9,11 +9,10 @@ data_dir: /home/sszabados/datasets/checkerboard/anulus_checkerboard_density_data
 diff_type: ref
 pred_type: s
 num_timesteps: 1000
-step_size: 0.001
-beta_start: 0.001
-beta_end: 1.0
+step_size: 0.004
+beta_start: 0.0001
+beta_end: 0.02
 beta_schedule: linear
-schedule_sampler: uniform
 global_batch_size: 10000
 global_sample_size: 100000
 batch_size: -1
@@ -22,6 +21,6 @@ slurm_id: -1
 Setting and loading constants...
 Creating data loader...
 Creating noise scheduler...
-[2024-11-09 16:59:39]====================
+[2024-11-25 19:50:21]====================
 Sampling from model...
 

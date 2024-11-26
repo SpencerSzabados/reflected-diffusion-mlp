@@ -59,7 +59,7 @@ class NoiseScheduler():
             self.eta_z = th.sqrt(1.0-self.alphas)
         else:
             self.eta_x = th.ones((num_timesteps,))
-            self.eta_z = th.full((num_timesteps,), th.sqrt(th.tensor(step_size)))
+            self.eta_z = th.full((num_timesteps,), th.tensor(step_size))
             
 
     def reconstruct_x0(self, x_t, t, noise):
@@ -152,12 +152,12 @@ class NoiseScheduler():
         """
         r_in = 0.25
         r_out = 1.0
-        margin = 0.07
+        margin = 1e-4
 
-        distances = th.linalg.norm(x_t, ord=2, dim=1)
+        distances = th.norm(x_t, p=2, dim=-1)
         
         # Determine if distances are within [r_in, r_out]
-        free_idx = (distances >= r_in+margin) & (distances <= r_out-margin)
+        free_idx = (distances > r_in+margin) & (distances < r_out-margin)
         coll_idx = ~free_idx
 
         return coll_idx, free_idx
@@ -177,6 +177,11 @@ class NoiseScheduler():
 
         # Perform accept-reject based on local geometry
         for k in range(t):
+            # Resample noise for all trajectories
+            noise_sample = th.randn_like(x_start)
+            noise = noise + self.eta_z[k]*noise_sample
+            x_noisy = self.eta_x[k]*x_noisy + self.eta_z[k]*noise_sample
+            
             coll_idx, free_idx = self._compute_collisions(x_noisy)  
             
             # If there are collisions, revert the changes for collided indices
@@ -188,11 +193,6 @@ class NoiseScheduler():
             if len(free_idx) > 0:
                 previous_noise[free_idx] = noise[free_idx]
                 previous_x_noisy[free_idx] = x_noisy[free_idx]
-
-            # Resample noise for all trajectories
-            noise_sample = th.randn_like(x_start)
-            noise = noise + self.eta_z[k]*noise_sample
-            x_noisy = self.eta_x[k]*x_noisy + self.eta_z[k]*noise_sample
 
         # TODO: Debug - incremental savinging of generated x_noisy
         #     import matplotlib.pyplot as plt
@@ -268,7 +268,7 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = (sample + self.step_size*model_output) # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
+                pred_prev_sample = sample + (self.eta_z[t]**2)*model_output # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")
@@ -283,7 +283,8 @@ class NoiseScheduler():
         return pred_prev_sample
 
     def add_noise(self, x_start, noise, t):
-        assert(x_start.device == noise.device)
+        if noise is not None:
+            assert(x_start.device == noise.device)
 
         if self.diff_type == "ddpm":
             s1 = self.sqrt_alphas_cumprod[t].reshape(-1, 1)

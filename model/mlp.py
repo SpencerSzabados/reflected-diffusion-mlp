@@ -23,7 +23,7 @@ class MLP(nn.Module):
             input_emb: str = "sinusoidal",
             diff_type: str = "ddpm",
             pred_type: str = "eps",
-            boundary_tol: float = 0.05,
+            boundary_tol: float = 0.005,
         ):
 
         super().__init__()
@@ -61,7 +61,7 @@ class MLP(nn.Module):
         r_out = 1.0
 
         # Compute the Euclidean distance of each point from the origin
-        distances = th.linalg.norm(x, ord=2, dim=1)
+        distances = th.norm(x, p=2, dim=-1)
 
         # Compute the absolute distances to the inner and outer boundaries
         distance_to_inner = th.abs(distances - r_in)
@@ -81,11 +81,12 @@ class MLP(nn.Module):
         t_emb = self.time_mlp(t)
 
         x_t_emb = th.cat((x1_emb, x2_emb, t_emb), dim=-1)
+        
         x = self.joint_mlp(x_t_emb)
 
         if self.diff_type == "ref":
             if self.pred_type == "s":
                 boundary_dist = self._compute_boundary_distance(x_t)
-                x = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)).reshape(-1, 1)*x
+                x = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)).view(-1, 1)*x
 
         return x
