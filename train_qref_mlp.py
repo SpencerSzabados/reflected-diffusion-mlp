@@ -473,10 +473,10 @@ def main():
                         model.eval()
                         with th.no_grad():
                             sample = next(iter(test_loader))[0].to(distribute_util.dev())
-                            sample = noise_scheduler.add_noise(sample, max_t-1)
+                            sample = noise_scheduler.add_noise(sample, None, max_t-1)
                             sample_size = sample.shape[0]
                             # Reverse process
-                            timesteps = list(range(len(noise_scheduler)))[::-1]
+                            timesteps = list(range(0, max_t))[::-1]
                             for i, rev_t in enumerate(tqdm(timesteps)):
                                 rev_t_tensor = th.from_numpy(np.repeat(t, sample_size)).long().to(distribute_util.dev())
                                 score = model(sample, rev_t_tensor)

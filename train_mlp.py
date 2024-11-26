@@ -436,7 +436,7 @@ def main():
             loss = loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch, loss_w=loss_w, score_w=score_w)
             # Update gradients
             loss.backward()
-            # nn.utils.clip_grad_norm_(model.parameters(), 1.0) # TODO: removed this line to speed up convergence.
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0) # TODO: removed this line to speed up convergence.
             optimizer.step()
             
             if args.ema > 0 and global_step % args.ema_interval == 0:
