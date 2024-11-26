@@ -473,6 +473,7 @@ def main():
                         model.eval()
                         with th.no_grad():
                             sample = next(iter(test_loader))[0].to(distribute_util.dev())
+                            sample = noise_scheduler.add_noise(sample, max_t-1)
                             sample_size = sample.shape[0]
                             # Reverse process
                             timesteps = list(range(len(noise_scheduler)))[::-1]

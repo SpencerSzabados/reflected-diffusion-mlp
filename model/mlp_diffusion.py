@@ -218,6 +218,11 @@ class NoiseScheduler():
 
         # Perform accept-reject based on local geometry
         for t in range(self.num_timesteps):
+            # Resample noise for all trajectories
+            noise_sample = th.randn_like(x_start)
+            noise = noise + self.eta_z[k]*noise_sample
+            x_noisy = self.eta_x[k]*x_noisy + self.eta_z[k]*noise_sample
+            
             coll_idx, free_idx = self._compute_collisions(x_noisy)  
             
             # If there are collisions, revert the changes for collided indices
@@ -229,11 +234,6 @@ class NoiseScheduler():
             if len(free_idx) > 0:
                 previous_noise[free_idx] = noise[free_idx]
                 previous_x_noisy[free_idx] = x_noisy[free_idx]
-
-            # Resample noise for all trajectories
-            noise_sample = th.randn_like(x_start)
-            noise = noise + self.eta_z[t]*noise_sample
-            x_noisy = self.eta_x[t]*x_noisy + self.eta_z[t]*noise_sample
      
         return x_noisy, noise
     
