@@ -220,8 +220,8 @@ class NoiseScheduler():
         for t in range(self.num_timesteps):
             # Resample noise for all trajectories
             noise_sample = th.randn_like(x_start)
-            noise = noise + self.eta_z[k]*noise_sample
-            x_noisy = self.eta_x[k]*x_noisy + self.eta_z[k]*noise_sample
+            noise = noise + self.eta_z[t]*noise_sample
+            x_noisy = self.eta_x[t]*x_noisy + self.eta_z[t]*noise_sample
             
             coll_idx, free_idx = self._compute_collisions(x_noisy)  
             
@@ -268,7 +268,7 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = sample + (self.eta_z[t]**2)*model_output # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
+                pred_prev_sample = sample + (0.0005)*model_output # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")

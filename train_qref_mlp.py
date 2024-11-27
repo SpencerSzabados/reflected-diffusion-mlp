@@ -450,7 +450,7 @@ def main():
                     loss = loss_fn(x_t, model, noise_scheduler, timesteps, None, batch, loss_w=loss_w, score_w=score_w)
                     # Update gradients
                     loss.backward()
-                    nn.utils.clip_grad_norm_(model.parameters(), 1.0) # TODO: removed this line to speed up convergence.
+                    # nn.utils.clip_grad_norm_(model.parameters(), 1.0) # TODO: removed this line to speed up convergence.
                     optimizer.step()
 
                     # Update EMA model after optmizer step
