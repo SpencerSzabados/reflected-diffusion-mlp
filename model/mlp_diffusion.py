@@ -152,7 +152,7 @@ class NoiseScheduler():
         """
         r_in = 0.25
         r_out = 1.0
-        margin = 1e-4
+        margin = 1e-6
 
         distances = th.norm(x_t, p=2, dim=-1)
         
@@ -268,7 +268,7 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = sample + (0.0005)*model_output # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
+                pred_prev_sample = sample + (self.step_size**2)*model_output # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")

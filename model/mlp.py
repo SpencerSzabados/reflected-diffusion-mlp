@@ -87,6 +87,6 @@ class MLP(nn.Module):
         if self.diff_type == "ref":
             if self.pred_type == "s":
                 boundary_dist = self._compute_boundary_distance(x_t)
-                x = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)).view(-1, 1)*x
+                x = th.min(th.ones_like(boundary_dist), self.fn(boundary_dist-self.boundary_tol)+1e-6).view(-1, 1)*x
 
         return x

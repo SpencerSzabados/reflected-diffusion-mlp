@@ -85,6 +85,7 @@ def create_argparser():
         lr=1e-4,
         weight_decay=0.0,
         weight_lambda=False,
+        clip_grad=1.0,
         ema=0.994,
         ema_interval=1,
         lr_anneal_steps=0,
@@ -385,6 +386,11 @@ def main():
     score_w = 1.0
     loss_fn = get_loss_fn(args)
 
+    # Loss tracking variables
+    global_step = 0
+    loss_count = 0
+    running_avg_loss = 0.0
+
     # Set up the optimizer
     optimizer = th.optim.AdamW(model.parameters(), lr=args.lr)
 
@@ -450,7 +456,7 @@ def main():
                     loss = loss_fn(x_t, model, noise_scheduler, timesteps, None, batch, loss_w=loss_w, score_w=score_w)
                     # Update gradients
                     loss.backward()
-                    # nn.utils.clip_grad_norm_(model.parameters(), 1.0) # TODO: removed this line to speed up convergence.
+                    nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad) 
                     optimizer.step()
 
                     # Update EMA model after optmizer step
@@ -458,14 +464,18 @@ def main():
                         update_ema(model, ema_model, args.ema)
                     
                     global_step += 1
+                    loss_count += 1
+                    running_avg_loss += (loss.detach().item() - running_avg_loss) / loss_count
 
-                    # Logging
-                    if global_step % args.log_interval == 0:
-                        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        logger.log(f"[{time_str}]"+"-"*20)
-                        logger.log(f"Time step: {t}")
-                        logger.log(f"Global Step: {global_step}")
-                        logger.log(f"Loss: {loss.detach().item()}")
+                    # If logging interval is reached log time, step number, and current batch loss.
+                    if global_step % args.log_interval == 0 and global_step > 0:
+                        time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        logger.log(f"[{time}]"+"-"*20)
+                        logger.log(f"Step: {global_step}")
+                        logger.log(f"Step loss: {loss.detach().item()}")
+                        logger.log(f"Avg loss: {running_avg_loss}")
+                        loss_count = 0
+                        running_avg_loss = 0.0
 
                     # Sampling
                     if global_step % args.sample_interval == 0:
