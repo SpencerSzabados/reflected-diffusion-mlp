@@ -125,7 +125,7 @@ class NoiseScheduler():
             if self.pred_type == "x":
                 if isinstance(t, th.Tensor):
                     t = t[0] 
-                # TODO: This score predictor seems to only denoise upto a certain point, and never recovers the original data.
+                # BUG: This score predictor seems to only denoise upto a certain point, and never recovers the original data.
                 variance = (self.step_size**2)*t*padding
                 pred_score = -(x_t-model_output)/(variance+1e-20)
             else:
@@ -194,16 +194,6 @@ class NoiseScheduler():
                 previous_noise[free_idx] = noise[free_idx]
                 previous_x_noisy[free_idx] = x_noisy[free_idx]
 
-        # TODO: Debug - incremental savinging of generated x_noisy
-        #     import matplotlib.pyplot as plt
-        #     frame = x_noisy.detach().cpu().numpy()
-        #     plt.figure(figsize=(4, 4))
-        #     plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-        #     plt.axis('off')
-        #     plt.savefig(f"tmp/sample_{k}.png", transparent=True)
-        #     plt.close()
-        # exit()
-
         return x_noisy, noise
     
     @th.no_grad()
@@ -268,7 +258,7 @@ class NoiseScheduler():
                 pred_prev_sample = model_output
 
             elif self.pred_type == "s":
-                pred_prev_sample = sample + (self.step_size**2)*model_output # TODO: [2024-11-03] added (1.0/th.sqrt(self.alphas[t])) scaling factor
+                pred_prev_sample = sample + (self.step_size**2)*model_output # TODO: test (1.0/th.sqrt(self.alphas[t])) scaling factor
                 
             else:
                 raise NotImplementedError(f"Must select valid self.pred_type.")

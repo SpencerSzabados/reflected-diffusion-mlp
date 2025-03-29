@@ -80,6 +80,7 @@ def create_argparser():
         lr=1e-4,
         weight_decay=0.0,
         weight_lambda=False,
+        clip_grad=1.0,
         ema=0.994,
         ema_interval=1,
         lr_anneal_steps=0,
@@ -365,8 +366,7 @@ def main():
                 time_emb=args.time_emb,
                 input_emb=args.input_emb,
                 diff_type=args.diff_type,
-                pred_type=args.pred_type)
-
+                pred_type=args.pred_type).to(distribute_util.dev())
     
     noise_scheduler = NoiseScheduler(diff_type=args.diff_type,
                                      pred_type=args.pred_type,
@@ -375,7 +375,6 @@ def main():
                                      step_size=args.step_size,
                                      num_timesteps=args.num_timesteps,
                                      beta_schedule=args.beta_schedule)
-
     
     logger.log("Creating optimizer...")
     # Get the loss function (ISM or MSE) based on args.loss
@@ -436,7 +435,7 @@ def main():
             loss = loss_fn(noisy, model, noise_scheduler, timesteps, noise, batch, loss_w=loss_w, score_w=score_w)
             # Update gradients
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0) # TODO: removed this line to speed up convergence.
+            nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad) 
             optimizer.step()
             
             if args.ema > 0 and global_step % args.ema_interval == 0:

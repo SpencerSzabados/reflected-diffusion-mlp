@@ -24,7 +24,7 @@ def setup_dist():
     if dist.is_initialized():
         return
     
-    # TODO: Note, line was added to allow command line specification of gpus.
+    # Line was added to allow command line specification of gpus.
     if "CUDA_VISIBLE_DEVICES" not in os.environ:
         os.environ["CUDA_VISIBLE_DEVICES"] = f"{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}"
 

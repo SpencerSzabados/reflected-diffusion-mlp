@@ -188,18 +188,20 @@ def main():
                 
                 for i, t in enumerate(tqdm(timesteps)):
                     sample = sample.to(distribute_util.dev())
-
-                    # TODO: debug - remove. This was added to plot denosing sequence 
-                    # frame = sample.detach().cpu().numpy()
-                    # plt.figure(figsize=(8, 8))
-                    # plt.scatter(frame[:, 0], frame[:, 1], alpha=0.5, s=1)
-                    # plt.axis('off')
-                    # plt.savefig(f"{outdir}/images/{args.exps}_debug_sample_{t}.png", transparent=True)
-                    # plt.close()
      
                     t = th.from_numpy(np.repeat(t, sample.shape[0])).long().to(distribute_util.dev())
-                    residual = model(sample, t).to(distribute_util.dev())
-                    sample = noise_scheduler.step(residual, t[0], sample) # TODO: Debug - maybe the time index is misaligned between the forwards and backwards pass due to passing t as the loop range when it should be t+1?
+                    
+                    if args.g_input:
+                        residual = th.zeros_like(sample)
+                        for k in range(5):
+                            sample_rot = rot_fn(sample, 2*th.pi/5.0, k)
+                            # residual += model(sample_rot, t)
+                            residual += inv_rot_fn(model(sample_rot, t), 2*th.pi/5.0, k)
+                        residual = residual/5.0
+                    else:
+                        residual = model(sample, t).to(distribute_util.dev())
+                        
+                    sample = noise_scheduler.step(residual, t[0], sample) # BUG: Maybe the time index is misaligned between the forwards and backwards pass due to passing t as the loop range when it should be t+1?
 
         else:
             raise NotImplementedError(f"Invalid value for diff_type.")

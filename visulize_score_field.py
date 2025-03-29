@@ -231,6 +231,64 @@ def main():
                     plt.close()
                     logger.log(f"Saved plot to {outdir}/images/{args.exps}_score_sample_{i}.png")
 
+        elif args.diff_type == "ref":
+            timesteps = list(range(len(noise_scheduler)))[::-1]
+
+            for i, t in enumerate(tqdm(timesteps)):
+                
+                # Plot the score field every 20th step.
+                if i%100 == 0 or i == args.num_timesteps-1:
+                    ## Create quiver plot of score vectors
+                    # sample_cpu = sample.detach().cpu().numpy()
+                    # score_cpu = 0.1*score.detach().cpu().numpy()
+                    # plt.figure(figsize=(8, 8))
+                    # plt.quiver(
+                    #     sample_cpu[:, 0], sample_cpu[:, 1], # Positions
+                    #     score_cpu[:, 0], score_cpu[:, 1],   # Score vectors
+                    #     angles='xy', scale_units='xy', scale=1, color='blue', alpha=0.6
+                    # )
+                    # plt.axis('equal')
+                    # plt.grid(True)
+
+                    ## Create flow plot of score vectors
+                    # Define a grid over the plot area
+                    x_min, x_max = -1.5, 1.5
+                    y_min, y_max = -1.5, 1.5
+                    xx, yy = np.meshgrid(
+                        np.linspace(x_min, x_max, 200),
+                        np.linspace(y_min, y_max, 200)
+                    )
+
+                    # Flatten grid for model input
+                    grid_points = np.vstack([xx.ravel(), yy.ravel()]).T
+                    grid_points_tensor = th.tensor(grid_points, dtype=th.float32).to(distribute_util.dev())
+
+                    # Repeat t_T for grid points
+                    t_grid = th.full((grid_points_tensor.shape[0],), t).to(distribute_util.dev())
+
+                    # Compute scores at grid points
+                    # scores_grid = model(grid_points_tensor, t_grid).cpu().numpy()
+
+                    scores_grid = th.zeros_like(grid_points_tensor)
+                    for k in range(5):
+                        grid_points_tensor_rot = rot_fn(grid_points_tensor, 2*th.pi/5.0, k)
+                        scores_grid += inv_rot_fn(model(grid_points_tensor_rot, t_grid), 2*th.pi/5.0, k)
+                    scores_grid = (scores_grid/5.0).cpu().numpy()
+
+                    # Reshape scores for plotting
+                    u = scores_grid[:, 0].reshape(xx.shape)
+                    v = scores_grid[:, 1].reshape(yy.shape)
+
+                    # Plot streamlines
+                    plt.figure(figsize=(8, 8), dpi=250)
+                    plt.streamplot(xx, yy, u, v, density=2.0, color='darkblue', linewidth=1)
+                    # plt.axis('equal')
+                    plt.axis('off')
+                    plt.grid(True)
+                    
+                    plt.savefig(f"{outdir}/images/{args.exps}_score_sample_{i}.png", transparent=True)
+                    plt.close()
+                    logger.log(f"Saved plot to {outdir}/images/{args.exps}_score_sample_{i}.png")
         else:
             raise NotImplementedError(f"Invalid value for diff_type.")
 

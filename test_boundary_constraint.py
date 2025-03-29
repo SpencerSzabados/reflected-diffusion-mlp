@@ -17,6 +17,8 @@ def _compute_boundary_distance(x):
 
         Returns:
             torch.Tensor: A tensor of shape [batch_size], containing the minimum distance from each point to the closest boundary.
+
+        TODO: Boundary values are currently hard coded. Should make this configurable.
         """
         r_in = 0.25
         r_out = 1.0

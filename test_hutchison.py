@@ -119,7 +119,6 @@ def main():
     estimated_div_rademacher = hutchinson_divergence(test_function, grid_points, num_samples=30, type="Rademacher").detach().numpy()
     estimated_div_guassian = hutchinson_divergence(test_function, grid_points, num_samples=30, type="Guassian").detach().numpy()
 
-
     # Compute absolute error
     error_rademacher = np.abs(estimated_div_rademacher - analytical_div)
     error_guassian = np.abs(estimated_div_guassian - analytical_div)
